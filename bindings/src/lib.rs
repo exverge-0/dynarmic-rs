@@ -1,0 +1,1004 @@
+#[cfg(test)]
+mod tests;
+
+pub mod internal {
+    #![allow(unsafe_op_in_unsafe_fn)]
+    #![allow(non_camel_case_types)]
+    #![allow(dead_code)]
+    #![allow(private_bounds)]
+
+    use std::marker::PhantomData;
+
+    mod bindings {
+        include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+    }
+    pub(crate) use bindings::*;
+    use crate::internal::root::Dynarmic::new_coprocessor;
+
+    /// Rust struct representing C++ `std::vector<T, Allocator>`.
+    /// This type cannot be constructed in Rust.
+    /// # Safety
+    /// - This type **cannot** be used to hold any type other than [Vector](crate::a64::Vector), [u64], and C++ `std::string`.
+    /// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate.
+    // todo: implement conversions for cxx::CxxVector?
+    #[repr(C)]
+    pub struct cpp_vector<T: cpp_vector_element, Allocator: cpp_allocator> {
+        __alloc: PhantomData<Allocator>,
+        __data: [*mut T; 3],
+    }
+
+    unsafe trait cpp_vector_element: Sized {
+        unsafe fn __dynarmic_drop(vec: &mut cpp_vector<Self, root::std::allocator>);
+    }
+    unsafe trait cpp_allocator {}
+
+    unsafe impl cpp_vector_element for root::std::string {
+        unsafe fn __dynarmic_drop(vec: &mut cpp_vector<Self, root::std::allocator>) {
+            unsafe {
+                root::Dynarmic::destroy_vec_cppstring(std::mem::transmute(vec));
+            }
+        }
+    }
+    unsafe impl cpp_vector_element for u64 {
+        unsafe fn __dynarmic_drop(vec: &mut cpp_vector<Self, root::std::allocator>) {
+            unsafe {
+                root::Dynarmic::destroy_vec_u64(vec);
+            }
+        }
+    }
+    unsafe impl cpp_vector_element for u128 {
+        unsafe fn __dynarmic_drop(vec: &mut cpp_vector<Self, root::std::allocator>) {
+            unsafe {
+                root::Dynarmic::destroy_vec_u128(vec);
+            }
+        }
+    }
+    unsafe impl cpp_allocator for root::std::allocator {}
+
+    impl<T: cpp_vector_element, Allocator: cpp_allocator> Drop for cpp_vector<T, Allocator> {
+        fn drop(&mut self) {
+            unsafe {
+                T::__dynarmic_drop(std::mem::transmute(self));
+            }
+        }
+    }
+
+    /// Rust struct representing C++ `std::optional<T>`.
+    /// This type can be constructed from [usize], [u64], or [u32] using [From].
+    /// # Safety
+    /// - The size of this type optional<T> is only confirmed to match C++ with T is [usize], [u64], or [u32]. Certain implementations may differ in size/alignment for other types.
+    /// - This type **will not** run [Drop] (or its C++ destructor) for its T types and should not be used for other types.
+    /// - This type may be used with [std::mem::transmute] to convert to/from another `std::optional<T>` FFI type of another crate.
+    #[repr(C)]
+    pub struct cpp_optional<T: Sized> {
+        __data: std::mem::MaybeUninit<T>,
+        __bool: bool,
+    }
+
+    impl From<usize> for cpp_optional<usize> {
+        fn from(value: usize) -> Self {
+            // bindgen can't pick between usize and uintptr, so to make this work across implementations we transmute
+            // safety: usize and uintptr are the same size
+            unsafe {
+                std::mem::transmute(root::Dynarmic::new_optional_usize(std::mem::transmute(
+                    value,
+                )))
+            }
+        }
+    }
+
+    impl From<u64> for cpp_optional<usize> {
+        fn from(value: u64) -> Self {
+            // bindgen can't pick between usize and uintptr, so to make this work across implementations we transmute
+            // safety: usize and uintptr are the same size
+            unsafe {
+                std::mem::transmute(root::Dynarmic::new_optional_usize(std::mem::transmute(
+                    value,
+                )))
+            }
+        }
+    }
+
+    impl From<u32> for cpp_optional<u32> {
+        fn from(value: u32) -> Self {
+            unsafe { root::Dynarmic::new_optional_u32(value) }
+        }
+    }
+
+    /// Rust struct representing C++ `std::shared_ptr<T>`.
+    /// This type cannot be constructed in Rust. TODO
+    /// # Safety
+    /// - This type **will not** run [Drop] (or its C++ destructor) for its T value. This implementation assumes that dynarmic will drop shared_ptr<T>, and dropping in Rust will only release this type, potentially causing memory leaks.
+    /// - This type may be used with [std::mem::transmute] to convert to/from another `std::shared_ptr<T>` FFI type of another crate.
+    // todo: implement conversions for cxx::SharedPtr?
+    #[repr(C)]
+    pub struct cpp_shared_ptr<T: Sized> {
+        __data: *mut T,
+        __control: *mut (),
+    }
+
+    impl cpp_shared_ptr<crate::a32::Coprocessor> {
+        pub fn new(coprocessor: crate::a32::Coprocessor) -> Self {
+            unsafe { std::mem::transmute(new_coprocessor(std::mem::transmute(&coprocessor))) }
+        }
+    }
+
+    impl Default for cpp_shared_ptr<crate::a32::Coprocessor> {
+        fn default() -> Self {
+            unsafe {
+                std::mem::zeroed()
+            }
+        }
+    }
+
+    const _: () = {
+        assert!(
+            size_of::<usize>() == size_of::<u64>(),
+            "Dynarmic only supports aarch64 and x86_64 architectures."
+        );
+        assert!(
+            root::Dynarmic::CompilerConstants_Optional_U32 == size_of::<cpp_optional<u32>>(),
+            "Failed to verify size of type std::optional<u32>"
+        );
+        assert!(
+            root::Dynarmic::CompilerConstants_Optional_U64 == size_of::<cpp_optional<u64>>(),
+            "Failed to verify size of type std::optional<u64>"
+        );
+        assert!(
+            root::Dynarmic::CompilerConstants_Optional_USize == size_of::<cpp_optional<usize>>(),
+            "Failed to verify size of type std::optional<usize>"
+        );
+        assert!(
+            root::Dynarmic::CompilerConstants_A32_UserConfig == size_of::<super::a32::UserConfig>(),
+            "Failed to verify size of type a32::UserConfig"
+        );
+        assert!(
+            root::Dynarmic::CompilerConstants_A64_UserConfig == size_of::<super::a64::UserConfig>(),
+            "Failed to verify size of type a64::UserConfig"
+        );
+        assert!(
+            root::Dynarmic::CompilerConstants_SharedPtr == size_of::<cpp_shared_ptr<crate::a32::Coprocessor>>(),
+            "Failed to verify size of type a32::cpp_shared_ptr"
+        )
+    };
+}
+
+use bitflags::bitflags;
+pub use internal::root::Dynarmic::{ExclusiveMonitor, HaltReason};
+
+bitflags! {
+    #[repr(transparent)]
+    pub struct OptimizationFlag: u32 {
+        #[doc = "This optimization avoids dispatcher lookups by allowing emitted basic blocks to jump\n directly to other basic blocks if the destination PC is predictable at JIT-time.\n This is a safe optimization."]
+        const BlockLinking = 1;
+        #[doc = "This optimization avoids dispatcher lookups by emulating a return stack buffer. This\n allows for function returns and syscall returns to be predicted at runtime.\n This is a safe optimization."]
+        const ReturnStackBuffer = 2;
+        #[doc = "This optimization enables a two-tiered dispatch system.\n A fast dispatcher (written in assembly) first does a look-up in a small MRU cache.\n If this fails, it falls back to the usual slower dispatcher.\n This is a safe optimization."]
+        const FastDispatch = 4;
+        #[doc = "This is an IR optimization. This optimization eliminates unnecessary emulated CPU state\n context lookups.\n This is a safe optimization."]
+        const GetSetElimination = 8;
+        #[doc = "This is an IR optimization. This optimization does constant propagation.\n This is a safe optimization."]
+        const ConstProp = 16;
+        #[doc = "This is enables miscellaneous safe IR optimizations."]
+        const MiscIROpt = 32;
+        #[doc = "This is an UNSAFE optimization that reduces accuracy of fused multiply-add operations.\n This unfuses fused instructions to improve performance on host CPUs without FMA support."]
+        const Unsafe_UnfuseFMA = 65536;
+        #[doc = "This is an UNSAFE optimization that reduces accuracy of certain floating-point instructions.\n This allows results of FRECPE and FRSQRTE to have **less** error than spec allows."]
+        const Unsafe_ReducedErrorFP = 131072;
+        #[doc = "This is an UNSAFE optimization that causes floating-point instructions to not produce correct NaNs.\n This may also result in inaccurate results when instructions are given certain special values."]
+        const Unsafe_InaccurateNaN = 262144;
+        #[doc = "This is an UNSAFE optimization that causes ASIMD floating-point instructions to be run with incorrect\n rounding modes. This may result in inaccurate results with all floating-point ASIMD instructions."]
+        const Unsafe_IgnoreStandardFPCRValue = 524288;
+        #[doc = "This is an UNSAFE optimization that causes the global monitor to be ignored. This may\n result in unexpected behaviour in multithreaded scenarios, including but not limited\n to data races and deadlocks."]
+        const Unsafe_IgnoreGlobalMonitor = 1048576;
+
+        const AllSafe = 0x0000FFFF;
+        const None = 0;
+    }
+}
+
+extern "C" fn usercallbacks_destructor() {
+    panic!(
+        "Dynarmic attempted to call UserCallbacks destructor; UserCallbacks should ALWAYS be owned by Rust code"
+    )
+}
+
+#[repr(transparent)]
+struct TypeInfoPtr(*const ());
+unsafe impl Send for TypeInfoPtr {}
+unsafe impl Sync for TypeInfoPtr {}
+
+unsafe extern "C" fn default_true(_: *mut ()) -> bool { true }
+unsafe extern "C" fn default_false(_: *mut ()) -> bool { false }
+unsafe extern "C" fn default_void(_: *mut ()) {}
+
+pub mod a32 {
+    pub use super::internal::root::Dynarmic::A32::{
+        ArchVersion, CoprocReg, Coprocessor, Coprocessor__bindgen_vtable as CoprocessorVTable,
+        Exception, IREmitter, Jit, VAddr,
+    };
+    use crate::OptimizationFlag;
+    use crate::internal::{cpp_optional, cpp_shared_ptr, root};
+
+    unsafe extern "C" fn memory_read_code(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+        unsafe {
+            if cfg!(itanium_abi) {
+                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+            } else {
+                (*((*this).__vtable as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+            }
+        }
+    }
+    unsafe extern "C" fn get_ticks_for_code(_: *mut UserCallbacks, _: bool, _: VAddr, _: u32) -> u64 { 1 }
+
+    #[repr(C)]
+    pub struct UserCallbacksVTable {
+        #[cfg(itanium_abi)]
+        offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks but with real functions, so this should always be 0 as UserCallbacks and TranslateCallbacks have no fields
+        #[cfg(itanium_abi)]
+        typeinfo: crate::TypeInfoPtr,
+
+        // TranslateCallbacks
+        memory_read_code:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+        pre_code_read_hook:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
+        pre_code_translation_hook:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
+        get_ticks_for_code:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
+
+        // these functions should never be called; UserCallbacks should always be owned by Rust
+        cpp_destructor: Option<unsafe extern "C" fn()>,
+        #[cfg(itanium_abi)]
+        itanium_destructor: Option<unsafe extern "C" fn()>,
+
+        // UserCallbacks
+        memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+        memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+        memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+        memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+        memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+        memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+        memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+        memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+        memory_write_exclusive_8:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool>,
+        memory_write_exclusive_16:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool>,
+        memory_write_exclusive_32:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool>,
+        memory_write_exclusive_64:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool>,
+        is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+        interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+        call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+        exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+        instruction_synchronization_barrier_raised:
+            Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+        add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+        get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+    }
+
+    #[repr(C)]
+    pub struct UserCallbacks {
+        __vtable: *const *const (),
+        __copy: std::marker::PhantomData<*mut ()>, // prevent UserCallbacks from being Send/Sync
+    }
+
+    impl UserCallbacksVTable {
+        #[cfg(itanium_abi)]
+        pub const fn new(memory_read_code:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+                         pre_code_read_hook:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
+                         pre_code_translation_hook:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
+                         get_ticks_for_code:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
+                         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+                         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+                         memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+                         memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+                         memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+                         memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+                         memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+                         memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+                         memory_write_exclusive_8:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool>,
+                         memory_write_exclusive_16:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool>,
+                         memory_write_exclusive_32:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool>,
+                         memory_write_exclusive_64:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool>,
+                         is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+                         interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+                         call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+                         exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+                         instruction_synchronization_barrier_raised:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+                         add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+                         get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>) -> Self {
+            let mut value = Self {
+                offset_to_top: 0,
+                typeinfo: crate::TypeInfoPtr(std::ptr::null()),
+                cpp_destructor: Some(crate::usercallbacks_destructor),
+                itanium_destructor: Some(crate::usercallbacks_destructor),
+                memory_read_code,
+                pre_code_read_hook,
+                pre_code_translation_hook,
+                get_ticks_for_code,
+                memory_read_8,
+                memory_read_16,
+                memory_read_32,
+                memory_read_64,
+                memory_write_8,
+                memory_write_16,
+                memory_write_32,
+                memory_write_64,
+                memory_write_exclusive_8,
+                memory_write_exclusive_16,
+                memory_write_exclusive_32,
+                memory_write_exclusive_64,
+                is_readonly_memory,
+                interpreter_fallback,
+                call_svc,
+                exception_raised,
+                instruction_synchronization_barrier_raised,
+                add_ticks,
+                get_ticks_remaining,
+            };
+            if value.memory_read_code.is_none() {
+                value.memory_read_code = Some(super::a32::memory_read_code)
+            }
+            if value.pre_code_read_hook.is_none() {
+                unsafe { value.pre_code_read_hook = Some(std::mem::transmute(crate::default_true as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.pre_code_translation_hook.is_none() {
+                unsafe { value.pre_code_translation_hook = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            if value.get_ticks_for_code.is_none() {
+                value.get_ticks_for_code = Some(super::a32::get_ticks_for_code);
+            }
+            if value.memory_write_exclusive_8.is_none() {
+                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_16.is_none() {
+                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_32.is_none() {
+                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_64.is_none() {
+                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.is_readonly_memory.is_none() {
+                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.instruction_synchronization_barrier_raised.is_none() {
+                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            value
+        }
+
+        #[cfg(msvc_abi)]
+        pub const fn new(memory_read_code:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+                         pre_code_read_hook:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
+                         pre_code_translation_hook:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
+                         get_ticks_for_code:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
+                         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+                         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+                         memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+                         memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+                         memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+                         memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+                         memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+                         memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+                         memory_write_exclusive_8:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool>,
+                         memory_write_exclusive_16:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool>,
+                         memory_write_exclusive_32:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool>,
+                         memory_write_exclusive_64:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool>,
+                         is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+                         interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+                         call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+                         exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+                         instruction_synchronization_barrier_raised:
+                         Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+                         add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+                         get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>) -> Self {
+            let mut value = Self {
+                cpp_destructor: Some(crate::usercallbacks_destructor),
+                memory_read_code,
+                pre_code_read_hook,
+                pre_code_translation_hook,
+                get_ticks_for_code,
+                memory_read_8,
+                memory_read_16,
+                memory_read_32,
+                memory_read_64,
+                memory_write_8,
+                memory_write_16,
+                memory_write_32,
+                memory_write_64,
+                memory_write_exclusive_8,
+                memory_write_exclusive_16,
+                memory_write_exclusive_32,
+                memory_write_exclusive_64,
+                is_readonly_memory,
+                interpreter_fallback,
+                call_svc,
+                exception_raised,
+                instruction_synchronization_barrier_raised,
+                add_ticks,
+                get_ticks_remaining,
+            };
+            if value.memory_read_code.is_none() {
+                value.memory_read_code = Some(super::a32::memory_read_code)
+            }
+            if value.pre_code_read_hook.is_none() {
+                unsafe { value.pre_code_read_hook = Some(std::mem::transmute(crate::default_true as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.pre_code_translation_hook.is_none() {
+                unsafe { value.pre_code_translation_hook = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            if value.get_ticks_for_code.is_none() {
+                value.get_ticks_for_code = Some(super::a32::get_ticks_for_code);
+            }
+            if value.memory_write_exclusive_8.is_none() {
+                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_16.is_none() {
+                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_32.is_none() {
+                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_64.is_none() {
+                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.is_readonly_memory.is_none() {
+                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.instruction_synchronization_barrier_raised.is_none() {
+                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            value
+        }
+    }
+
+    impl UserCallbacks {
+        pub fn new(vtable: &'static UserCallbacksVTable) -> Self {
+            unsafe {
+                if cfg!(itanium_abi) {
+                    Self {
+                        // skip typeinfo data
+                        __vtable: std::mem::transmute::<
+                            &'static UserCallbacksVTable,
+                            *const *const (),
+                        >(vtable)
+                            .add(2),
+                        __copy: std::marker::PhantomData,
+                    }
+                } else {
+                    Self {
+                        __vtable: std::mem::transmute(vtable),
+                        __copy: std::marker::PhantomData,
+                    }
+                }
+            }
+        }
+    }
+
+    #[repr(C)]
+    pub struct UserConfig<'a> {
+        pub callbacks: &'a UserCallbacks,
+        pub processor_id: usize,
+        pub global_monitor: Option<&'a mut root::Dynarmic::ExclusiveMonitor>,
+        #[doc = " Select the architecture version to use.\n There are minor behavioural differences between versions."]
+        pub arch_version: ArchVersion,
+        #[doc = " This selects other optimizations than can't otherwise be disabled by setting other\n configuration options. This includes:\n - IR optimizations\n - Block linking optimizations\n - RSB optimizations\n This is intended to be used for debugging."]
+        pub optimizations: root::Dynarmic::OptimizationFlag,
+        #[doc = " This enables unsafe optimizations that reduce emulation accuracy in favour of speed.\n For safety, in order to enable unsafe optimizations you have to set BOTH this flag\n AND the appropriate flag bits above.\n The prefered and tested mode for this library is with unsafe optimizations disabled."]
+        pub unsafe_optimizations: bool,
+        pub page_table: *mut [*mut u8; 1 << (32 - 12)],
+        #[doc = " Determines if the pointer in the page_table shall be offseted locally or globally.\n 'false' will access page_table[addr >> bits][addr & mask]\n 'true'  will access page_table[addr >> bits][addr]\n Note: page_table[addr >> bits] will still be checked to verify active pages.\n       So there might be wrongly faulted pages which maps to nullptr.\n       This can be avoided by carefully allocating the memory region."]
+        pub absolute_offset_page_table: bool,
+        #[doc = " Masks out the first N bits in host pointers from the page table.\n The intention behind this is to allow users of Dynarmic to pack attributes in the\n same integer and update the pointer attribute pair atomically.\n If the configured value is 3, all pointers will be forcefully aligned to 8 bytes."]
+        pub page_table_pointer_mask_bits: ::std::os::raw::c_int,
+        #[doc = " Determines if we should detect memory accesses via page_table that straddle are\n misaligned. Accesses that straddle page boundaries will fallback to the relevant\n memory callback.\n This value should be the required access sizes this applies to ORed together.\n To detect any access, use: 8 | 16 | 32 | 64."]
+        pub detect_misaligned_access_via_page_table: u8,
+        #[doc = " Determines if the above option only triggers when the misalignment straddles a\n page boundary."]
+        pub only_detect_misalignment_via_page_table_on_page_boundary: bool,
+        pub fastmem_pointer: cpp_optional<usize>,
+        #[doc = " Determines if instructions that pagefault should cause recompilation of that block\n with fastmem disabled.\n Recompiled code will use the page_table if this is available, otherwise memory\n accesses will hit the memory callbacks."]
+        pub recompile_on_fastmem_failure: bool,
+        #[doc = " Determines if we should use the above fastmem_pointer for exclusive reads and\n writes. On x64, dynarmic currently relies on x64 cmpxchg semantics which may not\n provide fully accurate emulation."]
+        pub fastmem_exclusive_access: bool,
+        #[doc = " Determines if exclusive access instructions that pagefault should cause\n recompilation of that block with fastmem disabled. Recompiled code will use memory\n callbacks."]
+        pub recompile_on_exclusive_fastmem_failure: bool,
+        pub coprocessors: [cpp_shared_ptr<Coprocessor>; 16],
+        #[doc = " When set to true, UserCallbacks::InstructionSynchronizationBarrierRaised will be\n called when an ISB instruction is executed.\n When set to false, ISB will be treated as a NOP instruction."]
+        pub hook_isb: bool,
+        #[doc = " Hint instructions would cause ExceptionRaised to be called with the appropriate\n argument."]
+        pub hook_hint_instructions: bool,
+        #[doc = " This option relates to translation. Generally when we run into an unpredictable\n instruction the ExceptionRaised callback is called. If this is true, we define\n definite behaviour for some unpredictable instructions."]
+        pub define_unpredictable_behaviour: bool,
+        #[doc = " HACK:\n This tells the translator a wall clock will be used, thus allowing it\n to avoid writting certain unnecessary code only needed for cycle timers."]
+        pub wall_clock_cntpct: bool,
+        #[doc = " This allows accurately emulating protection fault handlers. If true, we check\n for exit after every data memory access by the emulated program."]
+        pub check_halt_on_memory_access: bool,
+        #[doc = " This option allows you to disable cycle counting. If this is set to false,\n AddTicks and GetTicksRemaining are never called, and no cycle counting is done."]
+        pub enable_cycle_counting: bool,
+        #[doc = " This option relates to the CPSR.E flag. Enabling this option disables modification\n of CPSR.E by the emulated program, forcing it to 0.\n NOTE: Calling Jit::SetCpsr with CPSR.E=1 while this option is enabled may result\n       in unusual behavior."]
+        pub always_little_endian: bool,
+        pub code_cache_size: usize,
+        #[doc = " Internal use only"]
+        pub very_verbose_debugging_output: bool,
+    }
+
+    impl<'a> UserConfig<'a> {
+        pub fn new(
+            callbacks: &'a mut UserCallbacks,
+            global_monitor: Option<&'a mut super::ExclusiveMonitor>,
+        ) -> UserConfig<'a> {
+            Self {
+                callbacks,
+                processor_id: 0,
+                global_monitor,
+                arch_version: ArchVersion::v8,
+                optimizations: OptimizationFlag::AllSafe,
+                unsafe_optimizations: false,
+                page_table: std::ptr::null_mut(),
+                absolute_offset_page_table: false,
+                page_table_pointer_mask_bits: 0,
+                detect_misaligned_access_via_page_table: 0,
+                only_detect_misalignment_via_page_table_on_page_boundary: false,
+                fastmem_pointer: 0usize.into(),
+                recompile_on_fastmem_failure: true,
+                fastmem_exclusive_access: false,
+                recompile_on_exclusive_fastmem_failure: true,
+                coprocessors: Default::default(),
+                hook_isb: false,
+                hook_hint_instructions: false,
+                define_unpredictable_behaviour: false,
+                wall_clock_cntpct: false,
+                check_halt_on_memory_access: false,
+                enable_cycle_counting: true,
+                always_little_endian: false,
+                code_cache_size: 128 * 1024 * 1024,
+                very_verbose_debugging_output: false,
+            }
+        }
+    }
+
+    impl Drop for Jit {
+        fn drop(&mut self) {
+            unsafe { self.destruct() }
+        }
+    }
+}
+
+pub mod a64 {
+    pub use super::internal::root::Dynarmic::A64::{
+        DataCacheOperation, Exception, InstructionCacheOperation, Jit, VAddr, Vector,
+    };
+    use crate::internal::cpp_optional;
+
+    #[repr(C)]
+    pub struct UserCallbacksVTable {
+        #[cfg(itanium_abi)]
+        offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks but with real functions, so this should always be 0 as UserCallbacks has no fields
+        #[cfg(itanium_abi)]
+        typeinfo: crate::TypeInfoPtr,
+
+        // these functions should never be called; UserCallbacks should always be owned by Rust
+        cpp_destructor: Option<unsafe extern "C" fn()>,
+        #[cfg(itanium_abi)]
+        itanium_destructor: Option<unsafe extern "C" fn()>,
+
+        memory_read_code:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+        memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+        memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+        memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+        memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+        memory_read_128: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u128>,
+        memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+        memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+        memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+        memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+        memory_write_128: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u128)>,
+        memory_write_exclusive_8:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool>,
+        memory_write_exclusive_16:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool>,
+        memory_write_exclusive_32:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool>,
+        memory_write_exclusive_64:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool>,
+        memory_write_exclusive_128:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u128, u128) -> bool>,
+        is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+        interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+        call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+        exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+        data_cache_operation_raised: Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+        instruction_cache_operation_raised: Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+        instruction_synchronization_barrier_raised:
+            Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+        add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+        get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+        get_cntpct: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+    }
+    #[repr(C)]
+    pub struct UserCallbacks {
+        __vtable: *const *const (),
+        __copy: std::marker::PhantomData<*mut ()>, // prevent UserCallbacks from being Send/Sync
+    }
+
+    unsafe extern "C" fn memory_read_code(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+        unsafe {
+            if cfg!(itanium_abi) {
+                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+            } else {
+                (*((*this).__vtable as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+            }
+        }
+    }
+
+    impl UserCallbacksVTable {
+        #[cfg(itanium_abi)]
+        pub const fn new(
+            memory_read_code: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+            >,
+            memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+            memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+            memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+            memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+            memory_read_128: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u128>,
+            memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+            memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+            memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+            memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+            memory_write_128: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u128)>,
+            memory_write_exclusive_8: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool,
+            >,
+            memory_write_exclusive_16: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool,
+            >,
+            memory_write_exclusive_32: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool,
+            >,
+            memory_write_exclusive_64: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool,
+            >,
+            memory_write_exclusive_128: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u128, u128) -> bool,
+            >,
+            is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+            interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+            call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+            exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+            data_cache_operation_raised: Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+            instruction_cache_operation_raised: Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+            instruction_synchronization_barrier_raised: Option<
+                unsafe extern "C" fn(*mut UserCallbacks),
+            >,
+            add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+            get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+            get_cntpct: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+        ) -> UserCallbacksVTable {
+            let mut value = Self {
+                offset_to_top: 0,
+                typeinfo: crate::TypeInfoPtr(std::ptr::null()),
+                cpp_destructor: Some(crate::usercallbacks_destructor),
+                itanium_destructor: Some(crate::usercallbacks_destructor),
+                memory_read_code,
+                memory_read_8,
+                memory_read_16,
+                memory_read_32,
+                memory_read_64,
+                memory_read_128,
+                memory_write_8,
+                memory_write_16,
+                memory_write_32,
+                memory_write_64,
+                memory_write_128,
+                memory_write_exclusive_8,
+                memory_write_exclusive_16,
+                memory_write_exclusive_32,
+                memory_write_exclusive_64,
+                memory_write_exclusive_128,
+                is_readonly_memory,
+                interpreter_fallback,
+                call_svc,
+                exception_raised,
+                data_cache_operation_raised,
+                instruction_cache_operation_raised,
+                instruction_synchronization_barrier_raised,
+                add_ticks,
+                get_ticks_remaining,
+                get_cntpct,
+            };
+            if value.memory_read_code.is_none() {
+                value.memory_read_code = Some(super::a64::memory_read_code)
+            }
+            if value.memory_write_exclusive_8.is_none() {
+                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_16.is_none() {
+                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_32.is_none() {
+                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_64.is_none() {
+                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_128.is_none() {
+                unsafe { value.memory_write_exclusive_128 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.is_readonly_memory.is_none() {
+                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.instruction_cache_operation_raised.is_none() {
+                unsafe { value.instruction_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            if value.data_cache_operation_raised.is_none() {
+                unsafe { value.data_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            if value.instruction_synchronization_barrier_raised.is_none() {
+                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            value
+        }
+
+        #[cfg(msvc_abi)]
+        pub const fn new(
+            memory_read_code: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+            >,
+            memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+            memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+            memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+            memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+            memory_read_128: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u128>,
+            memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+            memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+            memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+            memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+            memory_write_128: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u128)>,
+            memory_write_exclusive_8: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool,
+            >,
+            memory_write_exclusive_16: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool,
+            >,
+            memory_write_exclusive_32: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool,
+            >,
+            memory_write_exclusive_64: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool,
+            >,
+            memory_write_exclusive_128: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u128, u128) -> bool,
+            >,
+            is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+            interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+            call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+            exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+            data_cache_operation_raised: Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+            instruction_cache_operation_raised: Option<unsafe extern "C" fn(*mut UserCallbacks)>,
+            instruction_synchronization_barrier_raised: Option<
+                unsafe extern "C" fn(*mut UserCallbacks),
+            >,
+            add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+            get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+            get_cntpct: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+        ) -> UserCallbacksVTable {
+            let mut value = Self {
+                cpp_destructor: Some(usercallbacks_destructor),
+                memory_read_code,
+                memory_read_8,
+                memory_read_16,
+                memory_read_32,
+                memory_read_64,
+                memory_read_128,
+                memory_write_8,
+                memory_write_16,
+                memory_write_32,
+                memory_write_64,
+                memory_write_128,
+                memory_write_exclusive_8,
+                memory_write_exclusive_16,
+                memory_write_exclusive_32,
+                memory_write_exclusive_64,
+                memory_write_exclusive_128,
+                is_readonly_memory,
+                interpreter_fallback,
+                call_svc,
+                exception_raised,
+                data_cache_operation_raised,
+                instruction_cache_operation_raised,
+                instruction_synchronization_barrier_raised,
+                add_ticks,
+                get_ticks_remaining,
+                get_cntpct,
+            };
+            if value.memory_read_code.is_none() {
+                value.memory_read_code = Some(super::a64::memory_read_code)
+            }
+            if value.memory_write_exclusive_8.is_none() {
+                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_16.is_none() {
+                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_32.is_none() {
+                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_64.is_none() {
+                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.memory_write_exclusive_128.is_none() {
+                unsafe { value.memory_write_exclusive_128 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.is_readonly_memory.is_none() {
+                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+            }
+            if value.instruction_cache_operation_raised.is_none() {
+                unsafe { value.instruction_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            if value.data_cache_operation_raised.is_none() {
+                unsafe { value.data_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            if value.instruction_synchronization_barrier_raised.is_none() {
+                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+            }
+            value
+        }
+    }
+
+    impl UserCallbacks {
+        pub fn new(vtable: &'static UserCallbacksVTable) -> Self {
+            unsafe {
+                if cfg!(itanium_abi) {
+                    Self {
+                        // skip typeinfo data
+                        __vtable: std::mem::transmute::<
+                            &'static UserCallbacksVTable,
+                            *const *const (),
+                        >(vtable)
+                        .add(2),
+                        __copy: std::marker::PhantomData,
+                    }
+                } else {
+                    Self {
+                        __vtable: std::mem::transmute(vtable),
+                        __copy: std::marker::PhantomData,
+                    }
+                }
+            }
+        }
+    }
+
+    #[repr(C)]
+    pub struct UserConfig<'a> {
+        pub callbacks: &'a mut UserCallbacks,
+        pub processor_id: usize,
+        pub global_monitor: *mut super::ExclusiveMonitor,
+        #[doc = " This selects other optimizations than can't otherwise be disabled by setting other\n configuration options. This includes:\n - IR optimizations\n - Block linking optimizations\n - RSB optimizations\n This is intended to be used for debugging."]
+        pub optimizations: super::OptimizationFlag,
+        #[doc = " This enables unsafe optimizations that reduce emulation accuracy in favour of speed.\n For safety, in order to enable unsafe optimizations you have to set BOTH this flag\n AND the appropriate flag bits above.\n The prefered and tested mode for this library is with unsafe optimizations disabled."]
+        pub unsafe_optimizations: bool,
+        #[doc = " When set to true, UserCallbacks::DataCacheOperationRaised will be called when any\n data cache instruction is executed. Notably DC ZVA will not implicitly do anything.\n When set to false, UserCallbacks::DataCacheOperationRaised will never be called.\n Executing DC ZVA in this mode will result in zeros being written to memory."]
+        pub hook_data_cache_operations: bool,
+        #[doc = " When set to true, UserCallbacks::InstructionSynchronizationBarrierRaised will be\n called when an ISB instruction is executed.\n When set to false, ISB will be treated as a NOP instruction."]
+        pub hook_isb: bool,
+        #[doc = " When set to true, UserCallbacks::ExceptionRaised will be called when any hint\n instruction is executed."]
+        pub hook_hint_instructions: bool,
+        #[doc = " Counter-timer frequency register. The value of the register is not interpreted by\n dynarmic."]
+        pub cntfrq_el0: u32,
+        #[doc = " CTR_EL0<27:24> is log2 of the cache writeback granule in words.\n CTR_EL0<23:20> is log2 of the exclusives reservation granule in words.\n CTR_EL0<19:16> is log2 of the smallest data/unified cacheline in words.\n CTR_EL0<15:14> is the level 1 instruction cache policy.\n CTR_EL0<3:0> is log2 of the smallest instruction cacheline in words."]
+        pub ctr_el0: u32,
+        #[doc = " DCZID_EL0<3:0> is log2 of the block size in words\n DCZID_EL0<4> is 0 if the DC ZVA instruction is permitted."]
+        pub dczid_el0: u32,
+        #[doc = " Pointer to where TPIDRRO_EL0 is stored. This pointer will be inserted into\n emitted code."]
+        pub tpidrro_el0: Option<&'a u64>,
+        #[doc = " Pointer to where TPIDR_EL0 is stored. This pointer will be inserted into\n emitted code."]
+        pub tpidr_el0: Option<&'a u64>,
+        #[doc = " Pointer to the page table which we can use for direct page table access.\n If an entry in page_table is null, the relevant memory callback will be called.\n If page_table is nullptr, all memory accesses hit the memory callbacks."]
+        pub page_table: *mut *mut std::ffi::c_void,
+        #[doc = " Declares how many valid address bits are there in virtual addresses.\n Determines the size of page_table. Valid values are between 12 and 64 inclusive.\n This is only used if page_table is not nullptr."]
+        pub page_table_address_space_bits: usize,
+        #[doc = " Masks out the first N bits in host pointers from the page table.\n The intention behind this is to allow users of Dynarmic to pack attributes in the\n same integer and update the pointer attribute pair atomically.\n If the configured value is 3, all pointers will be forcefully aligned to 8 bytes."]
+        pub page_table_pointer_mask_bits: ::std::os::raw::c_int,
+        #[doc = " Determines what happens if the guest accesses an entry that is off the end of the\n page table. If true, Dynarmic will silently mirror page_table's address space. If\n false, accessing memory outside of page_table bounds will result in a call to the\n relevant memory callback.\n This is only used if page_table is not nullptr."]
+        pub silently_mirror_page_table: bool,
+        #[doc = " Determines if the pointer in the page_table shall be offseted locally or globally.\n 'false' will access page_table[addr >> bits][addr & mask]\n 'true'  will access page_table[addr >> bits][addr]\n Note: page_table[addr >> bits] will still be checked to verify active pages.\n       So there might be wrongly faulted pages which maps to nullptr.\n       This can be avoided by carefully allocating the memory region."]
+        pub absolute_offset_page_table: bool,
+        #[doc = " Determines if we should detect memory accesses via page_table that straddle are\n misaligned. Accesses that straddle page boundaries will fallback to the relevant\n memory callback.\n This value should be the required access sizes this applies to ORed together.\n To detect any access, use: 8 | 16 | 32 | 64 | 128."]
+        pub detect_misaligned_access_via_page_table: u8,
+        #[doc = " Determines if the above option only triggers when the misalignment straddles a\n page boundary."]
+        pub only_detect_misalignment_via_page_table_on_page_boundary: bool,
+        #[doc = " Fastmem Pointer\n This should point to the beginning of a 2^page_table_address_space_bits bytes\n address space which is in arranged just like what you wish for emulated memory to\n be. If the host page faults on an address, the JIT will fallback to calling the\n MemoryRead*MemoryWrite* callbacks."]
+        pub fastmem_pointer: cpp_optional<usize>,
+        #[doc = " Determines if instructions that pagefault should cause recompilation of that block\n with fastmem disabled.\n Recompiled code will use the page_table if this is available, otherwise memory\n accesses will hit the memory callbacks."]
+        pub recompile_on_fastmem_failure: bool,
+        #[doc = " Declares how many valid address bits are there in virtual addresses.\n Determines the size of fastmem arena. Valid values are between 12 and 64 inclusive.\n This is only used if fastmem_pointer is set."]
+        pub fastmem_address_space_bits: usize,
+        #[doc = " Determines what happens if the guest accesses an entry that is off the end of the\n fastmem arena. If true, Dynarmic will silently mirror fastmem's address space. If\n false, accessing memory outside of fastmem bounds will result in a call to the\n relevant memory callback.\n This is only used if fastmem_pointer is set."]
+        pub silently_mirror_fastmem: bool,
+        #[doc = " Determines if we should use the above fastmem_pointer for exclusive reads and\n writes. On x64, dynarmic currently relies on x64 cmpxchg semantics which may not\n provide fully accurate emulation."]
+        pub fastmem_exclusive_access: bool,
+        #[doc = " Determines if exclusive access instructions that pagefault should cause\n recompilation of that block with fastmem disabled. Recompiled code will use memory\n callbacks."]
+        pub recompile_on_exclusive_fastmem_failure: bool,
+        #[doc = " This option relates to translation. Generally when we run into an unpredictable\n instruction the ExceptionRaised callback is called. If this is true, we define\n definite behaviour for some unpredictable instructions."]
+        pub define_unpredictable_behaviour: bool,
+        #[doc = " HACK:\n This tells the translator a wall clock will be used, thus allowing it\n to avoid writting certain unnecessary code only needed for cycle timers."]
+        pub wall_clock_cntpct: bool,
+        #[doc = " This allows accurately emulating protection fault handlers. If true, we check\n for exit after every data memory access by the emulated program."]
+        pub check_halt_on_memory_access: bool,
+        #[doc = " This option allows you to disable cycle counting. If this is set to false,\n AddTicks and GetTicksRemaining are never called, and no cycle counting is done."]
+        pub enable_cycle_counting: bool,
+        pub code_cache_size: usize,
+        #[doc = " Internal use only"]
+        pub very_verbose_debugging_output: bool,
+    }
+
+    impl<'a> UserConfig<'a> {
+        pub fn new(callbacks: &'a mut UserCallbacks) -> UserConfig<'a> {
+            Self {
+                callbacks,
+                processor_id: 0,
+                global_monitor: std::ptr::null_mut(),
+                optimizations: crate::OptimizationFlag::AllSafe,
+                unsafe_optimizations: false,
+                hook_data_cache_operations: false,
+                hook_isb: false,
+                hook_hint_instructions: false,
+                cntfrq_el0: 600000000,
+                ctr_el0: 0x8444c004,
+                dczid_el0: 4,
+                tpidrro_el0: None,
+                tpidr_el0: None,
+                page_table: std::ptr::null_mut(),
+                page_table_address_space_bits: 36,
+                page_table_pointer_mask_bits: 0,
+                silently_mirror_page_table: true,
+                absolute_offset_page_table: false,
+                detect_misaligned_access_via_page_table: 0,
+                only_detect_misalignment_via_page_table_on_page_boundary: false,
+                fastmem_pointer: 0usize.into(),
+                recompile_on_fastmem_failure: true,
+                fastmem_address_space_bits: 36,
+                silently_mirror_fastmem: true,
+                fastmem_exclusive_access: false,
+                recompile_on_exclusive_fastmem_failure: true,
+                define_unpredictable_behaviour: false,
+                wall_clock_cntpct: false,
+                check_halt_on_memory_access: false,
+                enable_cycle_counting: true,
+                code_cache_size: 128 * 1024 * 1024,
+                very_verbose_debugging_output: false,
+            }
+        }
+    }
+
+    impl Drop for Jit {
+        fn drop(&mut self) {
+            unsafe { self.destruct() }
+        }
+    }
+}

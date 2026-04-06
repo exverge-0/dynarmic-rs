@@ -1,0 +1,34 @@
+[package]
+name = "dynarmic-bindings"
+version = "0.3.3"
+edition = "2024"
+links = "dynarmic"
+description = "Bindings for an ARM dynamic recompiler"
+license = "0BSD"
+repository = "https://github.com/exverge-0/dynarmic-rs"
+
+include = [
+    "src/lib.rs",
+    "src/tests/mod.rs",
+    "wrapper.hpp",
+    "wrapper.cpp",
+    "build.rs",
+    "dynarmic/src/**",
+    "dynarmic/tests/**",
+    "dynarmic/externals/**",
+    "dynarmic/CMakeLists.txt",
+    "dynarmic/CMakeModules/**",
+]
+
+[dependencies]
+bitflags = "2.11.0"
+
+[build-dependencies]
+bindgen = "0.72.1"
+cmake = "0.1.58"
+cc = "1.2.58"
+
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
+rustdoc-args = ["--cfg", "docsrs"]

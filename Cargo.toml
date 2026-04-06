@@ -1,0 +1,9 @@
+[package]
+name = "dynarmic"
+version = "0.1.0"
+edition = "2024"
+description = "An ARM dynamic recompiler"
+license = "0BSD"
+repository = "https://github.com/exverge-0/dynarmic-rs"
+
+[dependencies]
