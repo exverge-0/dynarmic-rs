@@ -8,6 +8,7 @@ fn main() {
     let dst = cmake::Config::new("dynarmic/CMakeLists.txt")
         .define("CMAKE_BUILD_TYPE", "Release")
         .define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON")
+        .define("BOOST_INCLUDE_DIR", "dynarmic/externals/ext-boost")
         .generator("Ninja")
         .build();
 
