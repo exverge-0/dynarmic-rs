@@ -3,12 +3,13 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.hpp");
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
     // Compile dynarmic
     let dst = cmake::Config::new("dynarmic/CMakeLists.txt")
         .define("CMAKE_BUILD_TYPE", "Release")
         .define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON")
-        .define("Boost_INCLUDE_DIR", "externals/ext-boost")
+        .define("Boost_INCLUDE_DIR", manifest_dir.join("dynarmic").join("externals").join("ext-boost").to_str().unwrap())
         .generator("Ninja")
         .build();
 
