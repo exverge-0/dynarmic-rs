@@ -17,6 +17,9 @@ fn main() {
     println!("cargo:rustc-link-lib=dynarmic");
     println!("cargo:rustc-link-lib=fmt");
     println!("cargo:rustc-link-lib=mcl");
+    if cfg!(target_arch = "x86_64") {
+        println!("cargo:rustc-link-lib=zydis");
+    }
 
     let bindgen = bindgen::Builder::default()
         .header("wrapper.hpp")
