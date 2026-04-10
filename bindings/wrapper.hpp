@@ -49,4 +49,20 @@ std::shared_ptr<A32::Coprocessor> new_coprocessor(A32::Coprocessor* ptr) {
     return std::shared_ptr<A32::Coprocessor>((A32::Coprocessor*) copied, [](A32::Coprocessor* p) { free(p); });
 }
 
+A32::Jit* new_a32_jit(A32::UserConfig* conf) {
+    return new A32::Jit(*conf);
+}
+
+void delete_a32_jit(A32::Jit* ptr) {
+    delete ptr;
+}
+
+A64::Jit* new_a64_jit(A64::UserConfig* conf) {
+    return new A64::Jit(*conf);
+}
+
+void delete_a64_jit(A64::Jit* ptr) {
+    delete ptr;
+}
+
 } // namespace Dynarmic

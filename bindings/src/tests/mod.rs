@@ -1,5 +1,5 @@
 mod a32 {
-    use crate::a32::{Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
+    use crate::a32::{Jit, JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
     use std::collections::BTreeMap;
     use std::pin::Pin;
@@ -129,7 +129,7 @@ mod a32 {
     fn a32_add() {
         unsafe {
             let mut env = ArmTestEnv::new();
-            let mut jit = Jit::new(UserConfig::new(&mut env.base, None));
+            let mut jit = JitBox::new(UserConfig::new(&mut env.base, None));
 
             env.code_mem.push(0xe0810002); // ADD R0, R1, R2
             env.code_mem.push(0xeafffffe); // B .
@@ -153,7 +153,7 @@ mod a32 {
 }
 
 mod a64 {
-    use crate::a64::{Exception, Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
+    use crate::a64::{Exception, JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
     use std::collections::BTreeMap;
     use std::pin::Pin;
@@ -369,7 +369,7 @@ mod a64 {
     fn a64_add() {
         unsafe {
             let mut env = A64TestEnv::new();
-            let mut jit = Jit::new(UserConfig::new(&mut env.base));
+            let mut jit = JitBox::new(UserConfig::new(&mut env.base));
 
             env.code_mem.push(0x8b020020); // ADD X0, X1, X2
             env.code_mem.push(0x14000000); // B .

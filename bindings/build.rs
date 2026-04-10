@@ -1,15 +1,22 @@
-use std::env;
+use std::env::var;
 use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.hpp");
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
     // Compile dynarmic
     let dst = cmake::Config::new("dynarmic/CMakeLists.txt")
-        .define("CMAKE_BUILD_TYPE", "Release")
+        .define("CMAKE_BUILD_TYPE", "Debug")
         .define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON")
-        .define("Boost_INCLUDE_DIR", manifest_dir.join("dynarmic").join("externals").join("ext-boost").to_str().unwrap())
+        .define(
+            "Boost_INCLUDE_DIR",
+            PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap())
+                .join("dynarmic")
+                .join("externals")
+                .join("ext-boost")
+                .to_str()
+                .unwrap(),
+        )
         .generator("Ninja")
         .build();
 
@@ -17,7 +24,8 @@ fn main() {
     println!("cargo:rustc-link-lib=dynarmic");
     println!("cargo:rustc-link-lib=fmt");
     println!("cargo:rustc-link-lib=mcl");
-    if cfg!(target_arch = "x86_64") {
+
+    if var("CARGO_CFG_TARGET_ARCH").unwrap() == "x86_64" {
         println!("cargo:rustc-link-lib=zydis");
     }
 
@@ -27,23 +35,35 @@ fn main() {
         .vtable_generation(true)
         .opaque_type("std::_.*")
         .opaque_type("std::.*string.*")
-        .opaque_type("std::.*_ptr.*")
-        .blocklist_type("std::shared_ptr")
-        .blocklist_type("std::vector.*")
-        .blocklist_type("std::optional.*")
-        .blocklist_type("std::shared_.*")
+        .opaque_type("std::unique_ptr.*")
+        .blocklist_function("Dynarmic::.*::Jit_Jit")
+        .blocklist_item("std::shared_.*")
+        .blocklist_item("std::vector.*")
+        .blocklist_item("std::optional.*")
         .blocklist_type("Dynarmic::.*Vector")
         .blocklist_type("Dynarmic::.*::UserConfig")
         .blocklist_type("Dynarmic::.*::UserCallbacks.*")
         .blocklist_type("Dynarmic::OptimizationFlag")
-        .module_raw_line("root::std", "pub use crate::internal::cpp_vector as vector;")
-        .module_raw_line("root::std", "pub use crate::internal::cpp_optional as optional;")
-        .module_raw_line("root::std", "pub use crate::internal::cpp_shared_ptr as shared_ptr;")
+        .module_raw_line(
+            "root::std",
+            "pub use crate::internal::cpp_vector as vector;",
+        )
+        .module_raw_line(
+            "root::std",
+            "pub use crate::internal::cpp_optional as optional;",
+        )
+        .module_raw_line(
+            "root::std",
+            "pub use crate::internal::cpp_shared_ptr as shared_ptr;",
+        )
         .module_raw_line("root::Dynarmic::A64", "pub use crate::a64::UserConfig;")
         .module_raw_line("root::Dynarmic::A32", "pub use crate::a32::UserConfig;")
         .module_raw_line("root::Dynarmic::A64", "pub type Vector = u128;")
         .module_raw_line("root::Dynarmic", "pub type Vector = u128;")
-        .module_raw_line("root::Dynarmic", "pub type OptimizationFlag = crate::OptimizationFlag;")
+        .module_raw_line(
+            "root::Dynarmic",
+            "pub type OptimizationFlag = crate::OptimizationFlag;",
+        )
         .rustified_enum("Dynarmic::HaltReason")
         .rustified_enum("Dynarmic::A32::CoprocReg")
         .rustified_enum("Dynarmic::.*::Exception")
@@ -58,9 +78,8 @@ fn main() {
         .generate()
         .expect("Unable to generate bindings");
 
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
     bindgen
-        .write_to_file(out_path)
+        .write_to_file(PathBuf::from(var("OUT_DIR").unwrap()).join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
     // Compile constants and FFI helper functions
@@ -75,7 +94,7 @@ fn main() {
     } else if cc.get_compiler().is_like_msvc() {
         println!("cargo:rustc-cfg=msvc_abi");
     } else {
-        panic!("dynarmic-binding only supports Clang/GCC and MSVC compilers.");
+        panic!("dynarmic-bindings only supports Clang/GCC and MSVC compilers.");
     }
 
     cc.compile("wrapper");

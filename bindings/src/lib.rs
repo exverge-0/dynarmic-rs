@@ -12,8 +12,8 @@ pub mod internal {
     mod bindings {
         include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
     }
-    pub(crate) use bindings::*;
     use crate::internal::root::Dynarmic::new_coprocessor;
+    pub(crate) use bindings::*;
 
     /// Rust struct representing C++ `std::vector<T, Allocator>`.
     /// This type cannot be constructed in Rust.
@@ -106,7 +106,7 @@ pub mod internal {
     }
 
     /// Rust struct representing C++ `std::shared_ptr<T>`.
-    /// This type cannot be constructed in Rust. TODO
+    /// This type can only be constructed in Rust with [Coprocessor](crate::a32::Coprocessor).
     /// # Safety
     /// - This type **will not** run [Drop] (or its C++ destructor) for its T value. This implementation assumes that dynarmic will drop shared_ptr<T>, and dropping in Rust will only release this type, potentially causing memory leaks.
     /// - This type may be used with [std::mem::transmute] to convert to/from another `std::shared_ptr<T>` FFI type of another crate.
@@ -125,9 +125,7 @@ pub mod internal {
 
     impl Default for cpp_shared_ptr<crate::a32::Coprocessor> {
         fn default() -> Self {
-            unsafe {
-                std::mem::zeroed()
-            }
+            unsafe { std::mem::zeroed() }
         }
     }
 
@@ -157,7 +155,8 @@ pub mod internal {
             "Failed to verify size of type a64::UserConfig"
         );
         assert!(
-            root::Dynarmic::CompilerConstants_SharedPtr == size_of::<cpp_shared_ptr<crate::a32::Coprocessor>>(),
+            root::Dynarmic::CompilerConstants_SharedPtr
+                == size_of::<cpp_shared_ptr<crate::a32::Coprocessor>>(),
             "Failed to verify size of type a32::cpp_shared_ptr"
         )
     };
@@ -165,6 +164,7 @@ pub mod internal {
 
 use bitflags::bitflags;
 pub use internal::root::Dynarmic::{ExclusiveMonitor, HaltReason};
+use std::ops::{Deref, DerefMut};
 
 bitflags! {
     #[repr(transparent)]
@@ -208,8 +208,12 @@ struct TypeInfoPtr(*const ());
 unsafe impl Send for TypeInfoPtr {}
 unsafe impl Sync for TypeInfoPtr {}
 
-unsafe extern "C" fn default_true(_: *mut ()) -> bool { true }
-unsafe extern "C" fn default_false(_: *mut ()) -> bool { false }
+unsafe extern "C" fn default_true(_: *mut ()) -> bool {
+    true
+}
+unsafe extern "C" fn default_false(_: *mut ()) -> bool {
+    false
+}
 unsafe extern "C" fn default_void(_: *mut ()) {}
 
 pub mod a32 {
@@ -217,19 +221,36 @@ pub mod a32 {
         ArchVersion, CoprocReg, Coprocessor, Coprocessor__bindgen_vtable as CoprocessorVTable,
         Exception, IREmitter, Jit, VAddr,
     };
+    use crate::internal::{cpp_optional, cpp_shared_ptr, root::Dynarmic::new_a32_jit};
+    use crate::internal::root::Dynarmic::delete_a32_jit;
     use crate::OptimizationFlag;
-    use crate::internal::{cpp_optional, cpp_shared_ptr, root};
 
-    unsafe extern "C" fn memory_read_code(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+    unsafe extern "C" fn memory_read_code(
+        this: *mut UserCallbacks,
+        vaddr: VAddr,
+    ) -> cpp_optional<u32> {
         unsafe {
             if cfg!(itanium_abi) {
-                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
+                    .memory_read_32
+                    .unwrap()(this, vaddr)
+                .into()
             } else {
-                (*((*this).__vtable as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+                (*((*this).__vtable as *const UserCallbacksVTable))
+                    .memory_read_32
+                    .unwrap()(this, vaddr)
+                .into()
             }
         }
     }
-    unsafe extern "C" fn get_ticks_for_code(_: *mut UserCallbacks, _: bool, _: VAddr, _: u32) -> u64 { 1 }
+    unsafe extern "C" fn get_ticks_for_code(
+        _: *mut UserCallbacks,
+        _: bool,
+        _: VAddr,
+        _: u32,
+    ) -> u64 {
+        1
+    }
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
@@ -241,8 +262,7 @@ pub mod a32 {
         // TranslateCallbacks
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-        pre_code_read_hook:
-            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
+        pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
         pre_code_translation_hook:
             Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
         get_ticks_for_code:
@@ -288,38 +308,49 @@ pub mod a32 {
 
     impl UserCallbacksVTable {
         #[cfg(itanium_abi)]
-        pub const fn new(memory_read_code:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-                         pre_code_read_hook:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
-                         pre_code_translation_hook:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
-                         get_ticks_for_code:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
-                         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
-                         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
-                         memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
-                         memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
-                         memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
-                         memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
-                         memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
-                         memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
-                         memory_write_exclusive_8:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool>,
-                         memory_write_exclusive_16:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool>,
-                         memory_write_exclusive_32:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool>,
-                         memory_write_exclusive_64:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool>,
-                         is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
-                         interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
-                         call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
-                         exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
-                         instruction_synchronization_barrier_raised:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks)>,
-                         add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
-                         get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>) -> Self {
+        pub const fn new(
+            memory_read_code: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+            >,
+            pre_code_read_hook: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool,
+            >,
+            pre_code_translation_hook: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
+            >,
+            get_ticks_for_code: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64,
+            >,
+            memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+            memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+            memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+            memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+            memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+            memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+            memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+            memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+            memory_write_exclusive_8: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool,
+            >,
+            memory_write_exclusive_16: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool,
+            >,
+            memory_write_exclusive_32: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool,
+            >,
+            memory_write_exclusive_64: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool,
+            >,
+            is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+            interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+            call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+            exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+            instruction_synchronization_barrier_raised: Option<
+                unsafe extern "C" fn(*mut UserCallbacks),
+            >,
+            add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+            get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+        ) -> Self {
             let mut value = Self {
                 offset_to_top: 0,
                 typeinfo: crate::TypeInfoPtr(std::ptr::null()),
@@ -353,68 +384,111 @@ pub mod a32 {
                 value.memory_read_code = Some(super::a32::memory_read_code)
             }
             if value.pre_code_read_hook.is_none() {
-                unsafe { value.pre_code_read_hook = Some(std::mem::transmute(crate::default_true as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.pre_code_read_hook = Some(std::mem::transmute(
+                        crate::default_true as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.pre_code_translation_hook.is_none() {
-                unsafe { value.pre_code_translation_hook = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.pre_code_translation_hook = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             if value.get_ticks_for_code.is_none() {
                 value.get_ticks_for_code = Some(super::a32::get_ticks_for_code);
             }
             if value.memory_write_exclusive_8.is_none() {
-                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_8 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_16.is_none() {
-                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_16 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_32.is_none() {
-                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_32 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_64.is_none() {
-                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_64 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.is_readonly_memory.is_none() {
-                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.is_readonly_memory = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.instruction_synchronization_barrier_raised.is_none() {
-                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             value
         }
 
         #[cfg(msvc_abi)]
-        pub const fn new(memory_read_code:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-                         pre_code_read_hook:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
-                         pre_code_translation_hook:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
-                         get_ticks_for_code:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
-                         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
-                         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
-                         memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
-                         memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
-                         memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
-                         memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
-                         memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
-                         memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
-                         memory_write_exclusive_8:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool>,
-                         memory_write_exclusive_16:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool>,
-                         memory_write_exclusive_32:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool>,
-                         memory_write_exclusive_64:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool>,
-                         is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
-                         interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
-                         call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
-                         exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
-                         instruction_synchronization_barrier_raised:
-                         Option<unsafe extern "C" fn(*mut UserCallbacks)>,
-                         add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
-                         get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>) -> Self {
+        pub const fn new(
+            memory_read_code: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+            >,
+            pre_code_read_hook: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool,
+            >,
+            pre_code_translation_hook: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
+            >,
+            get_ticks_for_code: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64,
+            >,
+            memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
+            memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
+            memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
+            memory_read_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u64>,
+            memory_write_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8)>,
+            memory_write_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16)>,
+            memory_write_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32)>,
+            memory_write_64: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64)>,
+            memory_write_exclusive_8: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u8, u8) -> bool,
+            >,
+            memory_write_exclusive_16: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u16, u16) -> bool,
+            >,
+            memory_write_exclusive_32: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u32, u32) -> bool,
+            >,
+            memory_write_exclusive_64: Option<
+                unsafe extern "C" fn(*mut UserCallbacks, VAddr, u64, u64) -> bool,
+            >,
+            is_readonly_memory: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> bool>,
+            interpreter_fallback: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, usize)>,
+            call_svc: Option<unsafe extern "C" fn(*mut UserCallbacks, u32)>,
+            exception_raised: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr, Exception)>,
+            instruction_synchronization_barrier_raised: Option<
+                unsafe extern "C" fn(*mut UserCallbacks),
+            >,
+            add_ticks: Option<unsafe extern "C" fn(*mut UserCallbacks, u64)>,
+            get_ticks_remaining: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
+        ) -> Self {
             let mut value = Self {
                 cpp_destructor: Some(crate::usercallbacks_destructor),
                 memory_read_code,
@@ -445,31 +519,63 @@ pub mod a32 {
                 value.memory_read_code = Some(super::a32::memory_read_code)
             }
             if value.pre_code_read_hook.is_none() {
-                unsafe { value.pre_code_read_hook = Some(std::mem::transmute(crate::default_true as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.pre_code_read_hook = Some(std::mem::transmute(
+                        crate::default_true as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.pre_code_translation_hook.is_none() {
-                unsafe { value.pre_code_translation_hook = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.pre_code_translation_hook = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             if value.get_ticks_for_code.is_none() {
                 value.get_ticks_for_code = Some(super::a32::get_ticks_for_code);
             }
             if value.memory_write_exclusive_8.is_none() {
-                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_8 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_16.is_none() {
-                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_16 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_32.is_none() {
-                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_32 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_64.is_none() {
-                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_64 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.is_readonly_memory.is_none() {
-                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.is_readonly_memory = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.instruction_synchronization_barrier_raised.is_none() {
-                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             value
         }
@@ -485,7 +591,7 @@ pub mod a32 {
                             &'static UserCallbacksVTable,
                             *const *const (),
                         >(vtable)
-                            .add(2),
+                        .add(2),
                         __copy: std::marker::PhantomData,
                     }
                 } else {
@@ -502,11 +608,11 @@ pub mod a32 {
     pub struct UserConfig<'a> {
         pub callbacks: &'a UserCallbacks,
         pub processor_id: usize,
-        pub global_monitor: Option<&'a mut root::Dynarmic::ExclusiveMonitor>,
+        pub global_monitor: Option<&'a mut super::ExclusiveMonitor>,
         #[doc = " Select the architecture version to use.\n There are minor behavioural differences between versions."]
         pub arch_version: ArchVersion,
         #[doc = " This selects other optimizations than can't otherwise be disabled by setting other\n configuration options. This includes:\n - IR optimizations\n - Block linking optimizations\n - RSB optimizations\n This is intended to be used for debugging."]
-        pub optimizations: root::Dynarmic::OptimizationFlag,
+        pub optimizations: OptimizationFlag,
         #[doc = " This enables unsafe optimizations that reduce emulation accuracy in favour of speed.\n For safety, in order to enable unsafe optimizations you have to set BOTH this flag\n AND the appropriate flag bits above.\n The prefered and tested mode for this library is with unsafe optimizations disabled."]
         pub unsafe_optimizations: bool,
         pub page_table: *mut [*mut u8; 1 << (32 - 12)],
@@ -580,18 +686,59 @@ pub mod a32 {
         }
     }
 
-    impl Drop for Jit {
+    /// Smart pointer for dynarmic's A32 Jit
+    pub struct JitBox {
+        ptr: *mut Jit,
+    }
+
+    impl Drop for JitBox {
         fn drop(&mut self) {
-            unsafe { self.destruct() }
+            unsafe {
+                delete_a32_jit(self.ptr)
+            }
+        }
+    }
+
+    impl super::Deref for JitBox {
+        type Target = Jit;
+        fn deref(&self) -> &Self::Target {
+            unsafe {
+                &*self.ptr
+            }
+        }
+    }
+
+    impl super::DerefMut for JitBox {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            unsafe {
+                &mut *self.ptr
+            }
+        }
+    }
+
+    impl JitBox {
+        // for some reason, when calling the constructor or any function that
+        // returns Jit, rust is unable to call it without breaking and fucking
+        // up the parameters (maybe because Jit is a transparent type?)
+        // probably related: github.com/rust-lang/rust-bindgen/issues/778?
+        // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
+        pub unsafe fn new(mut conf: UserConfig) -> JitBox {
+            unsafe {
+                JitBox {
+                    ptr: new_a32_jit(&mut conf as *mut UserConfig),
+                }
+            }
         }
     }
 }
 
 pub mod a64 {
     pub use super::internal::root::Dynarmic::A64::{
-        DataCacheOperation, Exception, InstructionCacheOperation, Jit, VAddr, Vector,
+        DataCacheOperation, Exception, InstructionCacheOperation, Jit as Jit_I, VAddr, Vector,
     };
     use crate::internal::cpp_optional;
+    use crate::internal::root::Dynarmic::A64::Jit;
+    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit};
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
@@ -645,12 +792,21 @@ pub mod a64 {
         __copy: std::marker::PhantomData<*mut ()>, // prevent UserCallbacks from being Send/Sync
     }
 
-    unsafe extern "C" fn memory_read_code(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+    unsafe extern "C" fn memory_read_code(
+        this: *mut UserCallbacks,
+        vaddr: VAddr,
+    ) -> cpp_optional<u32> {
         unsafe {
             if cfg!(itanium_abi) {
-                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
+                    .memory_read_32
+                    .unwrap()(this, vaddr)
+                .into()
             } else {
-                (*((*this).__vtable as *const UserCallbacksVTable)).memory_read_32.unwrap()(this, vaddr).into()
+                (*((*this).__vtable as *const UserCallbacksVTable))
+                    .memory_read_32
+                    .unwrap()(this, vaddr)
+                .into()
             }
         }
     }
@@ -735,31 +891,67 @@ pub mod a64 {
                 value.memory_read_code = Some(super::a64::memory_read_code)
             }
             if value.memory_write_exclusive_8.is_none() {
-                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_8 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_16.is_none() {
-                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_16 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_32.is_none() {
-                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_32 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_64.is_none() {
-                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_64 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_128.is_none() {
-                unsafe { value.memory_write_exclusive_128 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_128 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.is_readonly_memory.is_none() {
-                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.is_readonly_memory = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.instruction_cache_operation_raised.is_none() {
-                unsafe { value.instruction_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.instruction_cache_operation_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             if value.data_cache_operation_raised.is_none() {
-                unsafe { value.data_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.data_cache_operation_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             if value.instruction_synchronization_barrier_raised.is_none() {
-                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             value
         }
@@ -808,7 +1000,7 @@ pub mod a64 {
             get_cntpct: Option<unsafe extern "C" fn(*mut UserCallbacks) -> u64>,
         ) -> UserCallbacksVTable {
             let mut value = Self {
-                cpp_destructor: Some(usercallbacks_destructor),
+                cpp_destructor: Some(crate::usercallbacks_destructor),
                 memory_read_code,
                 memory_read_8,
                 memory_read_16,
@@ -840,31 +1032,67 @@ pub mod a64 {
                 value.memory_read_code = Some(super::a64::memory_read_code)
             }
             if value.memory_write_exclusive_8.is_none() {
-                unsafe { value.memory_write_exclusive_8 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_8 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_16.is_none() {
-                unsafe { value.memory_write_exclusive_16 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_16 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_32.is_none() {
-                unsafe { value.memory_write_exclusive_32 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_32 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_64.is_none() {
-                unsafe { value.memory_write_exclusive_64 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_64 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.memory_write_exclusive_128.is_none() {
-                unsafe { value.memory_write_exclusive_128 = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.memory_write_exclusive_128 = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.is_readonly_memory.is_none() {
-                unsafe { value.is_readonly_memory = Some(std::mem::transmute(crate::default_false as unsafe extern "C" fn (*mut ()) -> bool)) }
+                unsafe {
+                    value.is_readonly_memory = Some(std::mem::transmute(
+                        crate::default_false as unsafe extern "C" fn(*mut ()) -> bool,
+                    ))
+                }
             }
             if value.instruction_cache_operation_raised.is_none() {
-                unsafe { value.instruction_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.instruction_cache_operation_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             if value.data_cache_operation_raised.is_none() {
-                unsafe { value.data_cache_operation_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.data_cache_operation_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             if value.instruction_synchronization_barrier_raised.is_none() {
-                unsafe { value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(crate::default_void as unsafe extern "C" fn (*mut ()))) }
+                unsafe {
+                    value.instruction_synchronization_barrier_raised = Some(std::mem::transmute(
+                        crate::default_void as unsafe extern "C" fn(*mut ()),
+                    ))
+                }
             }
             value
         }
@@ -996,9 +1224,46 @@ pub mod a64 {
         }
     }
 
-    impl Drop for Jit {
+    /// Smart pointer for dynarmic's A32 Jit
+    pub struct JitBox {
+        ptr: *mut Jit,
+    }
+
+    impl Drop for JitBox {
         fn drop(&mut self) {
-            unsafe { self.destruct() }
+            unsafe {
+                delete_a64_jit(self.ptr);
+            }
+        }
+    }
+
+    impl super::Deref for JitBox {
+        type Target = Jit;
+        fn deref(&self) -> &Self::Target {
+            unsafe { &*self.ptr }
+        }
+    }
+
+    impl super::DerefMut for JitBox {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            unsafe {
+                &mut *self.ptr
+            }
+        }
+    }
+
+    impl JitBox {
+        // for some reason, when calling the constructor or any function that
+        // returns Jit, rust is unable to call it without breaking and fucking
+        // up the parameters (maybe because Jit is a transparent type?)
+        // probably related: github.com/rust-lang/rust-bindgen/issues/778?
+        // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
+        pub unsafe fn new(mut conf: UserConfig) -> JitBox {
+            unsafe {
+                JitBox {
+                    ptr: new_a64_jit(&mut conf as *mut UserConfig),
+                }
+            }
         }
     }
 }
