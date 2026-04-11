@@ -6,7 +6,7 @@ fn main() {
 
     // Compile dynarmic
     let dst = cmake::Config::new("dynarmic/CMakeLists.txt")
-        .define("CMAKE_BUILD_TYPE", "Debug")
+        .define("CMAKE_BUILD_TYPE", "Release")
         .define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON")
         .define(
             "Boost_INCLUDE_DIR",
@@ -36,7 +36,6 @@ fn main() {
         .opaque_type("std::_.*")
         .opaque_type("std::.*string.*")
         .opaque_type("std::unique_ptr.*")
-        .blocklist_function("Dynarmic::.*::Jit_Jit")
         .blocklist_item("std::shared_.*")
         .blocklist_item("std::vector.*")
         .blocklist_item("std::optional.*")

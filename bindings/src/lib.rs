@@ -734,11 +734,10 @@ pub mod a32 {
 
 pub mod a64 {
     pub use super::internal::root::Dynarmic::A64::{
-        DataCacheOperation, Exception, InstructionCacheOperation, Jit as Jit_I, VAddr, Vector,
+        DataCacheOperation, Exception, InstructionCacheOperation, VAddr, Vector,
     };
     use crate::internal::cpp_optional;
-    use crate::internal::root::Dynarmic::A64::Jit;
-    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit};
+    use crate::internal::root::Dynarmic::{A64::Jit, delete_a64_jit, new_a64_jit};
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
