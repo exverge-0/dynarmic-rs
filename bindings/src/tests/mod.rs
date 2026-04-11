@@ -125,7 +125,7 @@ mod a32 {
         }
     }
 
-    //#[test]
+    #[test]
     fn a32_add() {
         unsafe {
             let mut env = ArmTestEnv::new();

@@ -26,7 +26,7 @@ fn main() {
     println!("cargo:rustc-link-lib=mcl");
 
     if var("CARGO_CFG_TARGET_ARCH").unwrap() == "x86_64" {
-        println!("cargo:rustc-link-lib=zydis");
+        println!("cargo:rustc-link-lib=Zydis");
     }
 
     let bindgen = bindgen::Builder::default()

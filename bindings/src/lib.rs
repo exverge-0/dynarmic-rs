@@ -262,7 +262,7 @@ pub mod a32 {
         // TranslateCallbacks
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-        pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
+        pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool>,
         pre_code_translation_hook:
             Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
         get_ticks_for_code:
@@ -313,7 +313,7 @@ pub mod a32 {
                 unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
             >,
             pre_code_read_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool,
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool,
             >,
             pre_code_translation_hook: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
