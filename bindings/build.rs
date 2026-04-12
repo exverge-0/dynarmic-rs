@@ -6,8 +6,11 @@ fn main() {
 
     // Compile dynarmic
     let dst = cmake::Config::new("dynarmic/CMakeLists.txt")
-        .define("CMAKE_BUILD_TYPE", "Release")
+        .always_configure(false)
+        .define("MASTER_PROJECT", "OFF")
+        .define("CMAKE_BUILD_TYPE", if var("PROFILE").unwrap() == "Release" { "Release" } else { "RelWithDebInfo" } )
         .define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON")
+        .define("DYNARMIC_WARNINGS_AS_ERRORS", "OFF")
         .define(
             "Boost_INCLUDE_DIR",
             PathBuf::from(var("CARGO_MANIFEST_DIR").unwrap())
@@ -22,6 +25,11 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-lib=dynarmic");
+    if var("PROFILE").unwrap() == "Debug" {
+        println!("cargo:rustc-link-lib=fmtd");
+    } else {
+        println!("cargo:rustc-link-lib=fmt")
+    }
     println!("cargo:rustc-link-lib=fmt");
     println!("cargo:rustc-link-lib=mcl");
 
@@ -29,6 +37,7 @@ fn main() {
         println!("cargo:rustc-link-lib=Zydis");
     }
 
+    // todo: what do we really generate here? we can manually bind everything else and drop the libclang dep
     let bindgen = bindgen::Builder::default()
         .header("wrapper.hpp")
         .enable_cxx_namespaces()
@@ -82,19 +91,17 @@ fn main() {
         .expect("Couldn't write bindings!");
 
     // Compile constants and FFI helper functions
-    let mut cc = cc::Build::new();
-    cc.cpp(true)
+    cc::Build::new()
+        .cpp(true)
         .std("c++20")
         .file("wrapper.cpp")
-        .include(format!("{}/include", dst.display()));
+        .include(format!("{}/include", dst.display()))
+        .compile("wrapper");
 
-    if cc.get_compiler().is_like_gnu() || cc.get_compiler().is_like_clang() {
+    if !cfg!(target_env = "msvc") {
+        // assume we're clang/gcc
         println!("cargo:rustc-cfg=itanium_abi");
-    } else if cc.get_compiler().is_like_msvc() {
-        println!("cargo:rustc-cfg=msvc_abi");
     } else {
-        panic!("dynarmic-bindings only supports Clang/GCC and MSVC compilers.");
+        println!("cargo:rustc-cfg=msvc_abi");
     }
-
-    cc.compile("wrapper");
 }

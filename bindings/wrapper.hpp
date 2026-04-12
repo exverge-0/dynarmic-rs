@@ -26,27 +26,35 @@ void destroy_vec_u128(std::vector<Vector>* vec) {
     vec->~vector();
 }
 
-std::optional<std::uintptr_t> new_optional_usize(std::uintptr_t s) {
+// https://github.com/rust-lang/rust/issues/38258
+void new_optional_usize(std::optional<std::uintptr_t>* out, std::uintptr_t s) {
     if (s == 0) {
-        return std::nullopt;
+        *out = std::nullopt;
+        return;
     }
-    return std::optional(s);
+    *out = std::optional(s);
+    return;
 }
 
-std::optional<std::uint32_t> new_optional_u32(std::uint32_t s) {
+// https://github.com/rust-lang/rust/issues/38258
+void new_optional_u32(std::optional<std::uint32_t>* out, std::uint32_t s) {
     if (s == 0) {
-        return std::nullopt;
+        *out = std::nullopt;
+        return;
     }
-    return std::optional(s);
+    *out = std::optional(s);
+    return;
 }
 
-std::shared_ptr<A32::Coprocessor> new_coprocessor(A32::Coprocessor* ptr) {
+// https://github.com/rust-lang/rust/issues/38258
+void new_coprocessor(std::shared_ptr<A32::Coprocessor>* out, A32::Coprocessor* ptr) {
     if (ptr == nullptr) {
-        return std::shared_ptr<A32::Coprocessor>();
+        *out = std::shared_ptr<A32::Coprocessor>();
+        return;
     }
     void* copied = malloc(sizeof(A32::Coprocessor));
     memcpy(copied, ptr, sizeof(A32::Coprocessor));
-    return std::shared_ptr<A32::Coprocessor>((A32::Coprocessor*) copied, [](A32::Coprocessor* p) { free(p); });
+    *out = std::shared_ptr<A32::Coprocessor>((A32::Coprocessor*) copied, [](A32::Coprocessor* p) { free(p); });
 }
 
 A32::Jit* new_a32_jit(A32::UserConfig* conf) {
