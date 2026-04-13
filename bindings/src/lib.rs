@@ -286,7 +286,7 @@ pub mod a32 {
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
         #[cfg(msvc_abi)]
         memory_read_code:
-            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr)>,
 
         pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool>,
         pre_code_translation_hook:
@@ -786,7 +786,7 @@ pub mod a64 {
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
         #[cfg(msvc_abi)]
         memory_read_code:
-            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr)>,
 
         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
