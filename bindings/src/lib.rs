@@ -233,23 +233,33 @@ pub mod a32 {
     use crate::internal::root::Dynarmic::delete_a32_jit;
     use crate::internal::{cpp_optional, cpp_shared_ptr, root::Dynarmic::new_a32_jit};
     use crate::OptimizationFlag;
+    use std::mem::MaybeUninit;
 
     unsafe extern "C" fn memory_read_code(
+        out: *mut cpp_optional<u32>,
         this: *mut UserCallbacks,
         vaddr: VAddr,
-    ) -> cpp_optional<u32> {
+    ) {
         unsafe {
             if cfg!(itanium_abi) {
-                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             } else {
-                (*((*this).__vtable as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             }
+        }
+    }
+    #[cfg(itanium_abi)]
+    unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+        unsafe {
+            let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
+            memory_read_code(uninit.as_mut_ptr(), this, vaddr);
+            uninit.assume_init()
         }
     }
     unsafe extern "C" fn get_ticks_for_code(
@@ -269,11 +279,18 @@ pub mod a32 {
         typeinfo: crate::TypeInfoPtr,
 
         // TranslateCallbacks
+
+        // https://github.com/rust-lang/rust/issues/38258
+        #[cfg(itanium_abi)]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+        #[cfg(msvc_abi)]
+        memory_read_code:
+            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+
         pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool>,
         pre_code_translation_hook:
-            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
+            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter)>,
         get_ticks_for_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
 
@@ -325,7 +342,7 @@ pub mod a32 {
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool,
             >,
             pre_code_translation_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter),
             >,
             get_ticks_for_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64,
@@ -390,7 +407,7 @@ pub mod a32 {
                 get_ticks_remaining,
             };
             if value.memory_read_code.is_none() {
-                value.memory_read_code = Some(super::a32::memory_read_code)
+                value.memory_read_code = Some(memory_read_code_itanium)
             }
             if value.pre_code_read_hook.is_none() {
                 unsafe {
@@ -457,13 +474,13 @@ pub mod a32 {
         #[cfg(msvc_abi)]
         pub const fn new(
             memory_read_code: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+                unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr),
             >,
             pre_code_read_hook: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool,
             >,
             pre_code_translation_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter),
             >,
             get_ticks_for_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64,
@@ -744,6 +761,7 @@ pub mod a32 {
 }
 
 pub mod a64 {
+    use std::mem::MaybeUninit;
     pub use super::internal::root::Dynarmic::A64::{
         DataCacheOperation, Exception, InstructionCacheOperation, VAddr, Vector,
     };
@@ -762,8 +780,14 @@ pub mod a64 {
         #[cfg(itanium_abi)]
         itanium_destructor: Option<unsafe extern "C" fn()>,
 
+        // https://github.com/rust-lang/rust/issues/38258
+        #[cfg(itanium_abi)]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+        #[cfg(msvc_abi)]
+        memory_read_code:
+            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+
         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
         memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
@@ -803,21 +827,31 @@ pub mod a64 {
     }
 
     unsafe extern "C" fn memory_read_code(
+        out: *mut cpp_optional<u32>,
         this: *mut UserCallbacks,
         vaddr: VAddr,
-    ) -> cpp_optional<u32> {
+    ) {
         unsafe {
             if cfg!(itanium_abi) {
-                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             } else {
-                (*((*this).__vtable as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             }
+        }
+    }
+
+    #[cfg(itanium_abi)]
+    unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+        unsafe {
+            let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
+            memory_read_code(uninit.as_mut_ptr(), this, vaddr);
+            uninit.assume_init()
         }
     }
 
@@ -898,7 +932,7 @@ pub mod a64 {
                 get_cntpct,
             };
             if value.memory_read_code.is_none() {
-                value.memory_read_code = Some(super::a64::memory_read_code)
+                value.memory_read_code = Some(memory_read_code_itanium)
             }
             if value.memory_write_exclusive_8.is_none() {
                 unsafe {
@@ -969,7 +1003,7 @@ pub mod a64 {
         #[cfg(msvc_abi)]
         pub const fn new(
             memory_read_code: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+                unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr),
             >,
             memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
             memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,

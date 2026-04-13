@@ -104,4 +104,7 @@ fn main() {
     } else {
         println!("cargo:rustc-cfg=msvc_abi");
     }
+
+    println!("cargo::rustc-check-cfg=cfg(itanium_abi)");
+    println!("cargo::rustc-check-cfg=cfg(msvc_abi)");
 }
