@@ -16,6 +16,7 @@ mod a32 {
     }
     const _: () = assert!(std::mem::offset_of!(ArmTestEnv, base) == 0);
 
+    #[cfg(itanium_abi)]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         addr: VAddr,
@@ -33,7 +34,7 @@ mod a32 {
         out: *mut cpp_optional<u32>,
         data: *mut UserCallbacks,
         addr: VAddr,
-    ) -> cpp_optional<u32> {
+    ) {
         let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
 
         if env.is_in_codemem(addr) {
@@ -205,7 +206,7 @@ mod a64 {
         out: *mut cpp_optional<u32>,
         data: *mut UserCallbacks,
         addr: VAddr,
-    ) -> cpp_optional<u32> {
+    ) {
         let env: &A64TestEnv = unsafe { std::mem::transmute(data) };
 
         if !env.is_in_codemem(addr) {
