@@ -39,6 +39,7 @@ mod a32 {
 
         if env.is_in_codemem(addr) {
             *out = env.code_mem[(addr as usize) / 4].into();
+            return;
         }
 
         *out = 0xEAFFFFFE.into();
