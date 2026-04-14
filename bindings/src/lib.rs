@@ -236,8 +236,8 @@ pub mod a32 {
     use std::mem::MaybeUninit;
 
     unsafe extern "C" fn memory_read_code(
-        out: *mut cpp_optional<u32>,
         this: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
         vaddr: VAddr,
     ) {
         unsafe {
@@ -258,7 +258,7 @@ pub mod a32 {
     unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
         unsafe {
             let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
-            memory_read_code(uninit.as_mut_ptr(), this, vaddr);
+            memory_read_code(this, uninit.as_mut_ptr(), vaddr);
             uninit.assume_init()
         }
     }
@@ -286,7 +286,7 @@ pub mod a32 {
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
         #[cfg(msvc_abi)]
         memory_read_code:
-            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr)>,
+            Option<unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr)>,
 
         pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool>,
         pre_code_translation_hook:
@@ -474,7 +474,7 @@ pub mod a32 {
         #[cfg(msvc_abi)]
         pub const fn new(
             memory_read_code: Option<
-                unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr),
+                unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr),
             >,
             pre_code_read_hook: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool,
@@ -786,7 +786,7 @@ pub mod a64 {
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
         #[cfg(msvc_abi)]
         memory_read_code:
-            Option<unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr)>,
+            Option<unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr)>,
 
         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
@@ -827,8 +827,8 @@ pub mod a64 {
     }
 
     unsafe extern "C" fn memory_read_code(
-        out: *mut cpp_optional<u32>,
         this: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
         vaddr: VAddr,
     ) {
         unsafe {
@@ -850,7 +850,7 @@ pub mod a64 {
     unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
         unsafe {
             let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
-            memory_read_code(uninit.as_mut_ptr(), this, vaddr);
+            memory_read_code(this, uninit.as_mut_ptr(), vaddr);
             uninit.assume_init()
         }
     }
@@ -1003,7 +1003,7 @@ pub mod a64 {
         #[cfg(msvc_abi)]
         pub const fn new(
             memory_read_code: Option<
-                unsafe extern "C" fn(*mut cpp_optional<u32>, *mut UserCallbacks, VAddr),
+                unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr),
             >,
             memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
             memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,

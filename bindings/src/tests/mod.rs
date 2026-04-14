@@ -31,8 +31,8 @@ mod a32 {
     }
     #[cfg(msvc_abi)]
     unsafe extern "C" fn memory_read_code(
-        out: *mut cpp_optional<u32>,
         data: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
         addr: VAddr,
     ) {
         let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
@@ -203,8 +203,8 @@ mod a64 {
     }
     #[cfg(msvc_abi)]
     unsafe extern "C" fn memory_read_code(
-        out: *mut cpp_optional<u32>,
         data: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
         addr: VAddr,
     ) {
         let env: &A64TestEnv = unsafe { std::mem::transmute(data) };
