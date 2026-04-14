@@ -1,6 +1,9 @@
 name: Build dynarmic-bindings
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
 
 env:
   CARGO_TERM_COLOR: always
@@ -34,5 +37,5 @@ jobs:
       working-directory: bindings
       
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose -- --test-threads=1
       working-directory: bindings

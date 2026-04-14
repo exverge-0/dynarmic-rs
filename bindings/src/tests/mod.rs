@@ -16,6 +16,7 @@ mod a32 {
     }
     const _: () = assert!(std::mem::offset_of!(ArmTestEnv, base) == 0);
 
+    #[cfg(itanium_abi)]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         addr: VAddr,
@@ -27,6 +28,21 @@ mod a32 {
         }
 
         0xEAFFFFFE.into()
+    }
+    #[cfg(msvc_abi)]
+    unsafe extern "C" fn memory_read_code(
+        data: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
+        addr: VAddr,
+    ) {
+        let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
+
+        if env.is_in_codemem(addr) {
+            *out = env.code_mem[(addr as usize) / 4].into();
+            return;
+        }
+
+        *out = 0xEAFFFFFE.into();
     }
     unsafe extern "C" fn memory_read_8(data: *mut UserCallbacks, addr: VAddr) -> u8 {
         let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
@@ -172,6 +188,7 @@ mod a64 {
 
     const _: () = assert!(std::mem::offset_of!(A64TestEnv, base) == 0);
 
+    #[cfg(itanium_abi)]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         addr: VAddr,
@@ -184,6 +201,22 @@ mod a64 {
 
         let index = (addr - env.code_mem_start_addr) as usize / 4;
         (*env.code_mem.get(index).unwrap()).into()
+    }
+    #[cfg(msvc_abi)]
+    unsafe extern "C" fn memory_read_code(
+        data: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
+        addr: VAddr,
+    ) {
+        let env: &A64TestEnv = unsafe { std::mem::transmute(data) };
+
+        if !env.is_in_codemem(addr) {
+            *out = 0x14000000.into(); // B .
+            return;
+        }
+
+        let index = (addr - env.code_mem_start_addr) as usize / 4;
+        *out = (*env.code_mem.get(index).unwrap()).into();
     }
 
     unsafe extern "C" fn memory_read_8(data: *mut UserCallbacks, addr: VAddr) -> u8 {

@@ -8,11 +8,12 @@ pub mod internal {
     #![allow(private_bounds)]
 
     use std::marker::PhantomData;
+    use std::mem::MaybeUninit;
 
     mod bindings {
         include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
     }
-    use crate::internal::root::Dynarmic::new_coprocessor;
+    use crate::a32::Coprocessor;
     pub(crate) use bindings::*;
 
     /// Rust struct representing C++ `std::vector<T, Allocator>`.
@@ -71,18 +72,18 @@ pub mod internal {
     /// - This type may be used with [std::mem::transmute] to convert to/from another `std::optional<T>` FFI type of another crate.
     #[repr(C)]
     pub struct cpp_optional<T: Sized> {
-        __data: std::mem::MaybeUninit<T>,
+        __data: MaybeUninit<T>,
         __bool: bool,
     }
 
     impl From<usize> for cpp_optional<usize> {
         fn from(value: usize) -> Self {
             // bindgen can't pick between usize and uintptr, so to make this work across implementations we transmute
-            // safety: usize and uintptr are the same size
+            // safety: std::mem::transmute has to confirm at compile time that usize and the parameter value (usize/u64, depending on impl) are the same size
             unsafe {
-                std::mem::transmute(root::Dynarmic::new_optional_usize(std::mem::transmute(
-                    value,
-                )))
+                let mut optional: MaybeUninit<cpp_optional<usize>> = MaybeUninit::uninit();
+                root::Dynarmic::new_optional_usize(std::mem::transmute(&mut optional), std::mem::transmute(value));
+                optional.assume_init()
             }
         }
     }
@@ -90,23 +91,27 @@ pub mod internal {
     impl From<u64> for cpp_optional<usize> {
         fn from(value: u64) -> Self {
             // bindgen can't pick between usize and uintptr, so to make this work across implementations we transmute
-            // safety: usize and uintptr are the same size
+            // safety: std::mem::transmute has to confirm at compile time that u64 and the parameter value (usize/u64, depending on impl) are the same size
             unsafe {
-                std::mem::transmute(root::Dynarmic::new_optional_usize(std::mem::transmute(
-                    value,
-                )))
+                let mut optional: MaybeUninit<cpp_optional<usize>> = MaybeUninit::uninit();
+                root::Dynarmic::new_optional_usize(std::mem::transmute(&mut optional), std::mem::transmute(value));
+                optional.assume_init()
             }
         }
     }
 
     impl From<u32> for cpp_optional<u32> {
         fn from(value: u32) -> Self {
-            unsafe { root::Dynarmic::new_optional_u32(value) }
+            unsafe {
+                let mut optional: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
+                root::Dynarmic::new_optional_u32(optional.as_mut_ptr(), value);
+                optional.assume_init()
+            }
         }
     }
 
     /// Rust struct representing C++ `std::shared_ptr<T>`.
-    /// This type can only be constructed in Rust with [Coprocessor](crate::a32::Coprocessor).
+    /// This type can only be constructed in Rust with [Coprocessor].
     /// # Safety
     /// - This type **will not** run [Drop] (or its C++ destructor) for its T value. This implementation assumes that dynarmic will drop shared_ptr<T>, and dropping in Rust will only release this type, potentially causing memory leaks.
     /// - This type may be used with [std::mem::transmute] to convert to/from another `std::shared_ptr<T>` FFI type of another crate.
@@ -117,13 +122,17 @@ pub mod internal {
         __control: *mut (),
     }
 
-    impl cpp_shared_ptr<crate::a32::Coprocessor> {
-        pub fn new(coprocessor: crate::a32::Coprocessor) -> Self {
-            unsafe { std::mem::transmute(new_coprocessor(std::mem::transmute(&coprocessor))) }
+    impl cpp_shared_ptr<Coprocessor> {
+        pub fn new(coprocessor: Coprocessor) -> Self {
+            unsafe {
+                let mut optional: MaybeUninit<cpp_shared_ptr<Coprocessor>> = MaybeUninit::uninit();
+                root::Dynarmic::new_coprocessor(optional.as_mut_ptr(), std::mem::transmute(&coprocessor)); // safety: new_coprocessor won't modify coprocessor
+                optional.assume_init()
+            }
         }
     }
 
-    impl Default for cpp_shared_ptr<crate::a32::Coprocessor> {
+    impl Default for cpp_shared_ptr<Coprocessor> {
         fn default() -> Self {
             unsafe { std::mem::zeroed() }
         }
@@ -156,7 +165,7 @@ pub mod internal {
         );
         assert!(
             root::Dynarmic::CompilerConstants_SharedPtr
-                == size_of::<cpp_shared_ptr<crate::a32::Coprocessor>>(),
+                == size_of::<cpp_shared_ptr<Coprocessor>>(),
             "Failed to verify size of type a32::cpp_shared_ptr"
         )
     };
@@ -221,26 +230,36 @@ pub mod a32 {
         ArchVersion, CoprocReg, Coprocessor, Coprocessor__bindgen_vtable as CoprocessorVTable,
         Exception, IREmitter, Jit, VAddr,
     };
-    use crate::internal::{cpp_optional, cpp_shared_ptr, root::Dynarmic::new_a32_jit};
     use crate::internal::root::Dynarmic::delete_a32_jit;
+    use crate::internal::{cpp_optional, cpp_shared_ptr, root::Dynarmic::new_a32_jit};
     use crate::OptimizationFlag;
+    use std::mem::MaybeUninit;
 
     unsafe extern "C" fn memory_read_code(
         this: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
         vaddr: VAddr,
-    ) -> cpp_optional<u32> {
+    ) {
         unsafe {
             if cfg!(itanium_abi) {
-                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             } else {
-                (*((*this).__vtable as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             }
+        }
+    }
+    #[cfg(itanium_abi)]
+    unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+        unsafe {
+            let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
+            memory_read_code(this, uninit.as_mut_ptr(), vaddr);
+            uninit.assume_init()
         }
     }
     unsafe extern "C" fn get_ticks_for_code(
@@ -260,11 +279,18 @@ pub mod a32 {
         typeinfo: crate::TypeInfoPtr,
 
         // TranslateCallbacks
+
+        // https://github.com/rust-lang/rust/issues/38258
+        #[cfg(itanium_abi)]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-        pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool>,
+        #[cfg(msvc_abi)]
+        memory_read_code:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr)>,
+
+        pre_code_read_hook: Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool>,
         pre_code_translation_hook:
-            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter)>,
+            Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter)>,
         get_ticks_for_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64>,
 
@@ -313,10 +339,10 @@ pub mod a32 {
                 unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
             >,
             pre_code_read_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool,
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool,
             >,
             pre_code_translation_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter),
             >,
             get_ticks_for_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64,
@@ -381,7 +407,7 @@ pub mod a32 {
                 get_ticks_remaining,
             };
             if value.memory_read_code.is_none() {
-                value.memory_read_code = Some(super::a32::memory_read_code)
+                value.memory_read_code = Some(memory_read_code_itanium)
             }
             if value.pre_code_read_hook.is_none() {
                 unsafe {
@@ -448,13 +474,13 @@ pub mod a32 {
         #[cfg(msvc_abi)]
         pub const fn new(
             memory_read_code: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+                unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr),
             >,
             pre_code_read_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr) -> bool,
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter) -> bool,
             >,
             pre_code_translation_hook: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, bool, *mut IREmitter),
+                unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, *mut IREmitter),
             >,
             get_ticks_for_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, bool, VAddr, u32) -> u64,
@@ -619,7 +645,7 @@ pub mod a32 {
         #[doc = " Determines if the pointer in the page_table shall be offseted locally or globally.\n 'false' will access page_table[addr >> bits][addr & mask]\n 'true'  will access page_table[addr >> bits][addr]\n Note: page_table[addr >> bits] will still be checked to verify active pages.\n       So there might be wrongly faulted pages which maps to nullptr.\n       This can be avoided by carefully allocating the memory region."]
         pub absolute_offset_page_table: bool,
         #[doc = " Masks out the first N bits in host pointers from the page table.\n The intention behind this is to allow users of Dynarmic to pack attributes in the\n same integer and update the pointer attribute pair atomically.\n If the configured value is 3, all pointers will be forcefully aligned to 8 bytes."]
-        pub page_table_pointer_mask_bits: ::std::os::raw::c_int,
+        pub page_table_pointer_mask_bits: std::os::raw::c_int,
         #[doc = " Determines if we should detect memory accesses via page_table that straddle are\n misaligned. Accesses that straddle page boundaries will fallback to the relevant\n memory callback.\n This value should be the required access sizes this applies to ORed together.\n To detect any access, use: 8 | 16 | 32 | 64."]
         pub detect_misaligned_access_via_page_table: u8,
         #[doc = " Determines if the above option only triggers when the misalignment straddles a\n page boundary."]
@@ -719,9 +745,11 @@ pub mod a32 {
     impl JitBox {
         // for some reason, when calling the constructor or any function that
         // returns Jit, rust is unable to call it without breaking and fucking
-        // up the parameters (maybe because Jit is a transparent type?)
-        // probably related: github.com/rust-lang/rust-bindgen/issues/778?
+        // up the parameters, my best guess is that parameter 1 set as an out ptr
+        // probably related: https://github.com/rust-lang/rust-bindgen/issues/778?
         // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
+        // this also happens on MSVC on both x86_64 and aarch64, although for a different reason:
+        // https://github.com/rust-lang/rust/issues/38258
         pub unsafe fn new(mut conf: UserConfig) -> JitBox {
             unsafe {
                 JitBox {
@@ -733,11 +761,12 @@ pub mod a32 {
 }
 
 pub mod a64 {
+    use std::mem::MaybeUninit;
     pub use super::internal::root::Dynarmic::A64::{
         DataCacheOperation, Exception, InstructionCacheOperation, VAddr, Vector,
     };
     use crate::internal::cpp_optional;
-    use crate::internal::root::Dynarmic::{A64::Jit, delete_a64_jit, new_a64_jit};
+    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit, A64::Jit};
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
@@ -751,8 +780,14 @@ pub mod a64 {
         #[cfg(itanium_abi)]
         itanium_destructor: Option<unsafe extern "C" fn()>,
 
+        // https://github.com/rust-lang/rust/issues/38258
+        #[cfg(itanium_abi)]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
+        #[cfg(msvc_abi)]
+        memory_read_code:
+            Option<unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr)>,
+
         memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
         memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
         memory_read_32: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u32>,
@@ -793,20 +828,30 @@ pub mod a64 {
 
     unsafe extern "C" fn memory_read_code(
         this: *mut UserCallbacks,
+        out: *mut cpp_optional<u32>,
         vaddr: VAddr,
-    ) -> cpp_optional<u32> {
+    ) {
         unsafe {
             if cfg!(itanium_abi) {
-                (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             } else {
-                (*((*this).__vtable as *const UserCallbacksVTable))
+                *out = (*((*this).__vtable as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
                 .into()
             }
+        }
+    }
+
+    #[cfg(itanium_abi)]
+    unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
+        unsafe {
+            let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
+            memory_read_code(this, uninit.as_mut_ptr(), vaddr);
+            uninit.assume_init()
         }
     }
 
@@ -887,7 +932,7 @@ pub mod a64 {
                 get_cntpct,
             };
             if value.memory_read_code.is_none() {
-                value.memory_read_code = Some(super::a64::memory_read_code)
+                value.memory_read_code = Some(memory_read_code_itanium)
             }
             if value.memory_write_exclusive_8.is_none() {
                 unsafe {
@@ -958,7 +1003,7 @@ pub mod a64 {
         #[cfg(msvc_abi)]
         pub const fn new(
             memory_read_code: Option<
-                unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
+                unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr),
             >,
             memory_read_8: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u8>,
             memory_read_16: Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> u16>,
@@ -1150,7 +1195,7 @@ pub mod a64 {
         #[doc = " Declares how many valid address bits are there in virtual addresses.\n Determines the size of page_table. Valid values are between 12 and 64 inclusive.\n This is only used if page_table is not nullptr."]
         pub page_table_address_space_bits: usize,
         #[doc = " Masks out the first N bits in host pointers from the page table.\n The intention behind this is to allow users of Dynarmic to pack attributes in the\n same integer and update the pointer attribute pair atomically.\n If the configured value is 3, all pointers will be forcefully aligned to 8 bytes."]
-        pub page_table_pointer_mask_bits: ::std::os::raw::c_int,
+        pub page_table_pointer_mask_bits: std::os::raw::c_int,
         #[doc = " Determines what happens if the guest accesses an entry that is off the end of the\n page table. If true, Dynarmic will silently mirror page_table's address space. If\n false, accessing memory outside of page_table bounds will result in a call to the\n relevant memory callback.\n This is only used if page_table is not nullptr."]
         pub silently_mirror_page_table: bool,
         #[doc = " Determines if the pointer in the page_table shall be offseted locally or globally.\n 'false' will access page_table[addr >> bits][addr & mask]\n 'true'  will access page_table[addr >> bits][addr]\n Note: page_table[addr >> bits] will still be checked to verify active pages.\n       So there might be wrongly faulted pages which maps to nullptr.\n       This can be avoided by carefully allocating the memory region."]
@@ -1252,11 +1297,7 @@ pub mod a64 {
     }
 
     impl JitBox {
-        // for some reason, when calling the constructor or any function that
-        // returns Jit, rust is unable to call it without breaking and fucking
-        // up the parameters (maybe because Jit is a transparent type?)
-        // probably related: github.com/rust-lang/rust-bindgen/issues/778?
-        // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
+        // see comments for a32's JitBox::new for why this is necessary
         pub unsafe fn new(mut conf: UserConfig) -> JitBox {
             unsafe {
                 JitBox {
