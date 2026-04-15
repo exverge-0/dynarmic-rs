@@ -1,6 +1,6 @@
 [package]
 name = "dynarmic-bindings"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2024"
 links = "dynarmic"
 description = "Bindings for an ARM dynamic recompiler"
@@ -9,15 +9,18 @@ repository = "https://github.com/exverge-0/dynarmic-rs"
 
 include = [
     "src/lib.rs",
-    "src/tests/mod.rs",
     "wrapper.hpp",
     "wrapper.cpp",
     "build.rs",
     "dynarmic/src/**",
-    "dynarmic/tests/**",
-    "dynarmic/externals/**",
     "dynarmic/CMakeLists.txt",
     "dynarmic/CMakeModules/**",
+    "dynarmic/externals/**",
+    "dynarmic/tests/**",
+
+    "!dynarmic/src/dynarmic/backend/arm64/mig/**",
+    "!dynarmic/src/dynarmic/backend/x64/mig/**",
+    "!**/.DS_Store"
 ]
 
 [dependencies]
