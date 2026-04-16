@@ -149,21 +149,19 @@ mod a32 {
     fn a32_add() {
         unsafe {
             let mut env = ArmTestEnv::new();
-            let mut jit = JitBox::new(UserConfig::new(&mut env.base, None));
-
             env.code_mem.push(0xe0810002); // ADD R0, R1, R2
             env.code_mem.push(0xeafffffe); // B .
-
+            env.ticks_left = 2;
+            
+            let mut jit = JitBox::new(UserConfig::new(&mut env.base, None));
             let regs: *mut [u32; 16] = jit.Regs() as *mut [u32; 16];
 
             (*regs)[0] = 0;
             (*regs)[1] = 1;
             (*regs)[2] = 2;
-
-            env.ticks_left = 2;
+            
             jit.Run();
-
-            let regs = jit.Regs() as *const [u32; 16];
+            
             assert_eq!((*regs)[0], 3);
             assert_eq!((*regs)[1], 1);
             assert_eq!((*regs)[2], 2);
@@ -399,16 +397,17 @@ mod a64 {
     fn a64_add() {
         unsafe {
             let mut env = A64TestEnv::new();
-            let mut jit = JitBox::new(UserConfig::new(&mut env.base));
 
             env.code_mem.push(0x8b020020); // ADD X0, X1, X2
             env.code_mem.push(0x14000000); // B .
+            env.ticks_left = 2;
+            
+            let mut jit = JitBox::new(UserConfig::new(&mut env.base));
 
             jit.SetRegister(0, 0);
             jit.SetRegister(1, 1);
             jit.SetRegister(2, 2);
-
-            env.ticks_left = 2;
+            
             jit.Run();
 
             assert_eq!(jit.GetRegister(0), 3);

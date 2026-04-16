@@ -226,6 +226,7 @@ unsafe extern "C" fn default_false(_: *mut ()) -> bool {
 unsafe extern "C" fn default_void(_: *mut ()) {}
 
 pub mod a32 {
+    use std::marker::PhantomData;
     pub use super::internal::root::Dynarmic::A32::{
         ArchVersion, CoprocReg, Coprocessor, Coprocessor__bindgen_vtable as CoprocessorVTable,
         Exception, IREmitter, Jit, VAddr,
@@ -712,12 +713,20 @@ pub mod a32 {
         }
     }
 
+    // for some reason, when calling the constructor or any function that
+    // returns Jit, rust is unable to call it without breaking and fucking
+    // up the parameters, my best guess is that parameter 1 set as an out ptr?
+    // probably related: https://github.com/rust-lang/rust-bindgen/issues/778
+    // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
+    // this also happens on MSVC on both x86_64 and aarch64, although for a different reason:
+    // https://github.com/rust-lang/rust/issues/38258
     /// Smart pointer for dynarmic's A32 Jit
-    pub struct JitBox {
+    pub struct JitBox<'callbacks> {
         ptr: *mut Jit,
+        lifetime: PhantomData<&'callbacks ()>
     }
 
-    impl Drop for JitBox {
+    impl Drop for JitBox<'_> {
         fn drop(&mut self) {
             unsafe {
                 delete_a32_jit(self.ptr)
@@ -725,7 +734,7 @@ pub mod a32 {
         }
     }
 
-    impl super::Deref for JitBox {
+    impl super::Deref for JitBox<'_> {
         type Target = Jit;
         fn deref(&self) -> &Self::Target {
             unsafe {
@@ -734,7 +743,7 @@ pub mod a32 {
         }
     }
 
-    impl super::DerefMut for JitBox {
+    impl super::DerefMut for JitBox<'_> {
         fn deref_mut(&mut self) -> &mut Self::Target {
             unsafe {
                 &mut *self.ptr
@@ -742,18 +751,12 @@ pub mod a32 {
         }
     }
 
-    impl JitBox {
-        // for some reason, when calling the constructor or any function that
-        // returns Jit, rust is unable to call it without breaking and fucking
-        // up the parameters, my best guess is that parameter 1 set as an out ptr
-        // probably related: https://github.com/rust-lang/rust-bindgen/issues/778?
-        // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
-        // this also happens on MSVC on both x86_64 and aarch64, although for a different reason:
-        // https://github.com/rust-lang/rust/issues/38258
-        pub unsafe fn new(mut conf: UserConfig) -> JitBox {
+    impl<'callbacks> JitBox<'callbacks> {
+        pub unsafe fn new(mut conf: UserConfig<'callbacks>) -> JitBox<'callbacks> {
             unsafe {
                 JitBox {
                     ptr: new_a32_jit(&mut conf as *mut UserConfig),
+                    lifetime: PhantomData
                 }
             }
         }
@@ -761,6 +764,7 @@ pub mod a32 {
 }
 
 pub mod a64 {
+    use std::marker::PhantomData;
     use std::mem::MaybeUninit;
     pub use super::internal::root::Dynarmic::A64::{
         DataCacheOperation, Exception, InstructionCacheOperation, VAddr, Vector,
@@ -1268,12 +1272,14 @@ pub mod a64 {
         }
     }
 
-    /// Smart pointer for dynarmic's A32 Jit
-    pub struct JitBox {
+    // see a32::JitBox for why this is necessary
+    /// Smart pointer for dynarmic's A64 Jit
+    pub struct JitBox<'callbacks> {
         ptr: *mut Jit,
+        lifetime: PhantomData<&'callbacks ()> // lifetime for UserCallbacks
     }
 
-    impl Drop for JitBox {
+    impl Drop for JitBox<'_> {
         fn drop(&mut self) {
             unsafe {
                 delete_a64_jit(self.ptr);
@@ -1281,14 +1287,14 @@ pub mod a64 {
         }
     }
 
-    impl super::Deref for JitBox {
+    impl super::Deref for JitBox<'_> {
         type Target = Jit;
         fn deref(&self) -> &Self::Target {
             unsafe { &*self.ptr }
         }
     }
 
-    impl super::DerefMut for JitBox {
+    impl super::DerefMut for JitBox<'_> {
         fn deref_mut(&mut self) -> &mut Self::Target {
             unsafe {
                 &mut *self.ptr
@@ -1296,12 +1302,13 @@ pub mod a64 {
         }
     }
 
-    impl JitBox {
+    impl<'callbacks> JitBox<'callbacks> {
         // see comments for a32's JitBox::new for why this is necessary
-        pub unsafe fn new(mut conf: UserConfig) -> JitBox {
+        pub unsafe fn new(mut conf: UserConfig<'callbacks>) -> JitBox<'callbacks> {
             unsafe {
                 JitBox {
                     ptr: new_a64_jit(&mut conf as *mut UserConfig),
+                    lifetime: PhantomData,
                 }
             }
         }
