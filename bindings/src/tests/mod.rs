@@ -1,5 +1,12 @@
+mod fastmem;
+
+unsafe extern "C" fn unimplemented() {
+    unimplemented!();
+}
+
 mod a32 {
-    use crate::a32::{Jit, JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
+    use super::unimplemented;
+    use crate::a32::{JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
     use std::collections::BTreeMap;
     use std::pin::Pin;
@@ -21,7 +28,7 @@ mod a32 {
         data: *mut UserCallbacks,
         addr: VAddr,
     ) -> cpp_optional<u32> {
-        let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<ArmTestEnv>() };
 
         if env.is_in_codemem(addr) {
             return env.code_mem[(addr as usize) / 4].into();
@@ -35,7 +42,7 @@ mod a32 {
         out: *mut cpp_optional<u32>,
         addr: VAddr,
     ) {
-        let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<ArmTestEnv>() };
 
         if env.is_in_codemem(addr) {
             *out = env.code_mem[(addr as usize) / 4].into();
@@ -45,7 +52,7 @@ mod a32 {
         *out = 0xEAFFFFFE.into();
     }
     unsafe extern "C" fn memory_read_8(data: *mut UserCallbacks, addr: VAddr) -> u8 {
-        let env: &ArmTestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<ArmTestEnv>() };
 
         if env.is_in_codemem(addr) {
             return env.code_mem[(addr as usize) / 4] as u8;
@@ -65,7 +72,7 @@ mod a32 {
         memory_read_32(data, addr) as u64 | ((memory_read_32(data, addr + 4) as u64) << 32)
     }
     unsafe extern "C" fn memory_write_8(data: *mut UserCallbacks, addr: VAddr, value: u8) {
-        let env: &mut ArmTestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &mut *data.cast::<ArmTestEnv>() };
 
         if env.is_in_codemem(addr) {
             env.code_mem_modified_by_guest = true;
@@ -86,7 +93,7 @@ mod a32 {
     }
 
     unsafe extern "C" fn add_ticks(data: *mut UserCallbacks, ticks: u64) {
-        let env: &mut ArmTestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &mut *data.cast::<ArmTestEnv>() };
 
         if ticks > env.ticks_left {
             env.ticks_left = 0;
@@ -96,9 +103,6 @@ mod a32 {
     }
     unsafe extern "C" fn get_ticks_remaining(data: *mut UserCallbacks) -> u64 {
         unsafe { std::mem::transmute::<*mut UserCallbacks, &ArmTestEnv>(data).ticks_left }
-    }
-    unsafe extern "C" fn unimplemented() {
-        unimplemented!();
     }
     static ArmTestEnv_CALLBACKS: UserCallbacksVTable = UserCallbacksVTable::new(
         Some(memory_read_code),
@@ -173,6 +177,8 @@ mod a64 {
     use crate::internal::cpp_optional;
     use std::collections::BTreeMap;
     use std::pin::Pin;
+    use crate::tests::unimplemented;
+
     // based off dynarmic testenv
     #[repr(C)]
     struct A64TestEnv {
@@ -193,7 +199,7 @@ mod a64 {
         data: *mut UserCallbacks,
         addr: VAddr,
     ) -> cpp_optional<u32> {
-        let env: &A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<A64TestEnv>() };
 
         if !env.is_in_codemem(addr) {
             return 0x14000000.into(); // B .
@@ -208,7 +214,7 @@ mod a64 {
         out: *mut cpp_optional<u32>,
         addr: VAddr,
     ) {
-        let env: &A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<A64TestEnv>() };
 
         if !env.is_in_codemem(addr) {
             *out = 0x14000000.into(); // B .
@@ -220,7 +226,7 @@ mod a64 {
     }
 
     unsafe extern "C" fn memory_read_8(data: *mut UserCallbacks, addr: VAddr) -> u8 {
-        let env: &A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<A64TestEnv>() };
 
         if env.is_in_codemem(addr) {
             return env.code_mem[(addr - env.code_mem_start_addr) as usize] as u8;
@@ -246,7 +252,7 @@ mod a64 {
     }
 
     unsafe extern "C" fn memory_write_8(data: *mut UserCallbacks, addr: VAddr, value: u8) {
-        let env: &mut A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &mut *data.cast::<A64TestEnv>() };
 
         if env.is_in_codemem(addr) {
             env.code_mem_modified_by_guest = true;
@@ -317,7 +323,7 @@ mod a64 {
     }
 
     unsafe extern "C" fn add_ticks(data: *mut UserCallbacks, ticks: u64) {
-        let env: &mut A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &mut *data.cast::<A64TestEnv>() };
 
         if ticks > env.ticks_left {
             env.ticks_left = 0;
@@ -327,25 +333,16 @@ mod a64 {
     }
 
     unsafe extern "C" fn get_ticks_remaining(data: *mut UserCallbacks) -> u64 {
-        let env: &mut A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<A64TestEnv>() };
         env.ticks_left
     }
 
     unsafe extern "C" fn get_cntpct(data: *mut UserCallbacks) -> u64 {
-        let env: &mut A64TestEnv = unsafe { std::mem::transmute(data) };
+        let env = unsafe { &*data.cast::<A64TestEnv>() };
         0x10000000000 - env.ticks_left
     }
     unsafe extern "C" fn is_readonly_memory(data: *mut UserCallbacks, _: VAddr) -> bool {
         false
-    }
-    unsafe extern "C" fn interpreter_fallback(data: *mut UserCallbacks, _: VAddr, _: usize) {
-        unimplemented!()
-    }
-    unsafe extern "C" fn call_svc(data: *mut UserCallbacks, _: u32) {
-        unimplemented!()
-    }
-    unsafe extern "C" fn exception_raised(data: *mut UserCallbacks, _: VAddr, _: Exception) {
-        unimplemented!()
     }
     unsafe extern "C" fn data_cached_operation_raised(data: *mut UserCallbacks) {}
     unsafe extern "C" fn instruction_cache_operation_raised(data: *mut UserCallbacks) {}
@@ -369,9 +366,9 @@ mod a64 {
         Some(memory_write_exclusive_64),
         Some(memory_write_exclusive_128),
         Some(is_readonly_memory),
-        Some(interpreter_fallback),
-        Some(call_svc),
-        Some(exception_raised),
+        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn()) }),
+        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn()) }),
+        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn()) }),
         Some(data_cached_operation_raised),
         Some(instruction_cache_operation_raised),
         Some(instruction_synchronization_barrier_raised),
