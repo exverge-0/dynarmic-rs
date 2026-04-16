@@ -6,7 +6,7 @@ unsafe extern "C" fn unimplemented() {
 
 mod a32 {
     use super::unimplemented;
-    use crate::a32::{JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
+    use crate::a32::{Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
     use std::collections::BTreeMap;
     use std::pin::Pin;
@@ -153,29 +153,28 @@ mod a32 {
             env.code_mem.push(0xeafffffe); // B .
             env.ticks_left = 2;
             
-            let mut jit = JitBox::new(UserConfig::new(&mut env.base, None));
-            let regs: *mut [u32; 16] = jit.Regs() as *mut [u32; 16];
+            let mut jit = Jit::new(UserConfig::new(&mut env.base, None));
 
-            (*regs)[0] = 0;
-            (*regs)[1] = 1;
-            (*regs)[2] = 2;
+            jit.set_reg(0, 0);
+            jit.set_reg(1, 1);
+            jit.set_reg(2, 2);
             
-            jit.Run();
+            jit.run();
             
-            assert_eq!((*regs)[0], 3);
-            assert_eq!((*regs)[1], 1);
-            assert_eq!((*regs)[2], 2);
-            //assert_eq!(jit.Regs(), 4);
+            assert_eq!(jit.get_reg(0), 3);
+            assert_eq!(jit.get_reg(1), 1);
+            assert_eq!(jit.get_reg(2), 2);
+            assert_eq!(jit.get_pc(), 4);
         }
     }
 }
 
 mod a64 {
-    use crate::a64::{Exception, JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
+    use crate::a64::{Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
+    use crate::tests::unimplemented;
     use std::collections::BTreeMap;
     use std::pin::Pin;
-    use crate::tests::unimplemented;
 
     // based off dynarmic testenv
     #[repr(C)]
@@ -402,18 +401,18 @@ mod a64 {
             env.code_mem.push(0x14000000); // B .
             env.ticks_left = 2;
             
-            let mut jit = JitBox::new(UserConfig::new(&mut env.base));
+            let mut jit = Jit::new(UserConfig::new(&mut env.base));
 
-            jit.SetRegister(0, 0);
-            jit.SetRegister(1, 1);
-            jit.SetRegister(2, 2);
+            jit.set_reg(0, 0);
+            jit.set_reg(1, 1);
+            jit.set_reg(2, 2);
             
-            jit.Run();
+            jit.run();
 
-            assert_eq!(jit.GetRegister(0), 3);
-            assert_eq!(jit.GetRegister(1), 1);
-            assert_eq!(jit.GetRegister(2), 2);
-            assert_eq!(jit.GetPC(), 4);
+            assert_eq!(jit.get_reg(0), 3);
+            assert_eq!(jit.get_reg(1), 1);
+            assert_eq!(jit.get_reg(2), 2);
+            assert_eq!(jit.get_pc(), 4);
         }
     }
 }

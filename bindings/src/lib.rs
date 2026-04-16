@@ -15,15 +15,16 @@ pub mod internal {
     }
     use crate::a32::Coprocessor;
     pub(crate) use bindings::*;
+    pub(crate) use root::std::{string as cpp_string, allocator as cpp_allocator};
 
     /// Rust struct representing C++ `std::vector<T, Allocator>`.
     /// This type cannot be constructed in Rust.
     /// # Safety
-    /// - This type **cannot** be used to hold any type other than [Vector](crate::a64::Vector), [u64], and C++ `std::string`.
+    /// - This type **cannot** be used to hold any type other than [u128], [u64], and C++ `std::string`.
     /// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate.
     // todo: implement conversions for cxx::CxxVector?
     #[repr(C)]
-    pub struct cpp_vector<T: cpp_vector_element, Allocator: cpp_allocator> {
+    pub struct cpp_vector<T: cpp_vector_element, Allocator: cpp_vector_allocator> {
         __alloc: PhantomData<Allocator>,
         __data: [*mut T; 3],
     }
@@ -31,7 +32,7 @@ pub mod internal {
     unsafe trait cpp_vector_element: Sized {
         unsafe fn __dynarmic_drop(vec: &mut cpp_vector<Self, root::std::allocator>);
     }
-    unsafe trait cpp_allocator {}
+    unsafe trait cpp_vector_allocator {}
 
     unsafe impl cpp_vector_element for root::std::string {
         unsafe fn __dynarmic_drop(vec: &mut cpp_vector<Self, root::std::allocator>) {
@@ -54,9 +55,9 @@ pub mod internal {
             }
         }
     }
-    unsafe impl cpp_allocator for root::std::allocator {}
+    unsafe impl cpp_vector_allocator for root::std::allocator {}
 
-    impl<T: cpp_vector_element, Allocator: cpp_allocator> Drop for cpp_vector<T, Allocator> {
+    impl<T: cpp_vector_element, Allocator: cpp_vector_allocator> Drop for cpp_vector<T, Allocator> {
         fn drop(&mut self) {
             unsafe {
                 T::__dynarmic_drop(std::mem::transmute(self));
@@ -229,11 +230,12 @@ pub mod a32 {
     use std::marker::PhantomData;
     pub use super::internal::root::Dynarmic::A32::{
         ArchVersion, CoprocReg, Coprocessor, Coprocessor__bindgen_vtable as CoprocessorVTable,
-        Exception, IREmitter, Jit, VAddr,
+        Exception, IREmitter, VAddr,
     };
-    use crate::internal::root::Dynarmic::delete_a32_jit;
-    use crate::internal::{cpp_optional, cpp_shared_ptr, root::Dynarmic::new_a32_jit};
-    use crate::OptimizationFlag;
+    use crate::internal::root::Dynarmic::{delete_a32_jit, new_a32_jit, A32::Jit as Jit_I};
+    use crate::internal::root::Dynarmic::A32::*;
+    use crate::internal::{cpp_optional, cpp_shared_ptr};
+    use crate::{HaltReason, OptimizationFlag};
     use std::mem::MaybeUninit;
 
     unsafe extern "C" fn memory_read_code(
@@ -713,20 +715,12 @@ pub mod a32 {
         }
     }
 
-    // for some reason, when calling the constructor or any function that
-    // returns Jit, rust is unable to call it without breaking and fucking
-    // up the parameters, my best guess is that parameter 1 set as an out ptr?
-    // probably related: https://github.com/rust-lang/rust-bindgen/issues/778
-    // this issue only occurs on x86_64, though for clarity we implement this wrapper for both
-    // this also happens on MSVC on both x86_64 and aarch64, although for a different reason:
-    // https://github.com/rust-lang/rust/issues/38258
-    /// Smart pointer for dynarmic's A32 Jit
-    pub struct JitBox<'callbacks> {
-        ptr: *mut Jit,
+    pub struct Jit<'callbacks> {
+        ptr: *mut Jit_I,
         lifetime: PhantomData<&'callbacks ()>
     }
 
-    impl Drop for JitBox<'_> {
+    impl Drop for Jit<'_> {
         fn drop(&mut self) {
             unsafe {
                 delete_a32_jit(self.ptr)
@@ -734,31 +728,166 @@ pub mod a32 {
         }
     }
 
-    impl super::Deref for JitBox<'_> {
-        type Target = Jit;
-        fn deref(&self) -> &Self::Target {
+    impl<'callbacks> Jit<'callbacks> {
+        pub unsafe fn new(mut conf: UserConfig<'callbacks>) -> Jit<'callbacks> {
             unsafe {
-                &*self.ptr
-            }
-        }
-    }
-
-    impl super::DerefMut for JitBox<'_> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            unsafe {
-                &mut *self.ptr
-            }
-        }
-    }
-
-    impl<'callbacks> JitBox<'callbacks> {
-        pub unsafe fn new(mut conf: UserConfig<'callbacks>) -> JitBox<'callbacks> {
-            unsafe {
-                JitBox {
+                Jit {
                     ptr: new_a32_jit(&mut conf as *mut UserConfig),
                     lifetime: PhantomData
                 }
             }
+        }
+
+        /// Runs the emulated CPU.
+        /// Cannot be recursively called.
+        #[inline]
+        pub fn run(&mut self) -> HaltReason {
+            unsafe { Jit_Run(self.ptr) }
+        }
+
+        /// Step the emulated CPU for one instruction.
+        /// Cannot be recursively called.
+        #[inline]
+        pub fn step(&mut self) -> HaltReason {
+            unsafe { Jit_Step(self.ptr) }
+        }
+
+        /// Clears the code cache of all compiled code.
+        /// Can be called at any time. Halts execution if called within a callback.
+        #[inline]
+        pub fn clear_cache(&mut self) {
+            unsafe { Jit_ClearCache(self.ptr) }
+        }
+
+        /// Reset CPU state to state at startup. Does not clear code cache.
+        /// Cannot be called from a callback.
+        #[inline]
+        pub fn reset(&mut self) {
+            unsafe { Jit_Reset(self.ptr) }
+        }
+
+        /// Stops execution during [Jit::run].
+        #[inline]
+        pub fn halt(&mut self, hr: HaltReason) {
+            unsafe { Jit_HaltExecution(self.ptr, hr) }
+        }
+
+        /// Clears a halt reason from flags.
+        #[inline]
+        pub unsafe fn clear_halt(&mut self, hr: HaltReason) {
+            unsafe { Jit_ClearHalt(self.ptr, hr) }
+        }
+
+        /// View general-purpose registers.
+        #[inline]
+        pub fn get_regs(&self) -> &[u32; 16] {
+            unsafe { std::slice::from_raw_parts::<u32>(Jit_Regs(self.ptr).cast(), 16).try_into().unwrap_unchecked() }
+        }
+
+        /// Replace general-purpose registers.
+        #[inline]
+        pub fn set_regs(&mut self, regs: [u32; 16]) {
+            unsafe {
+                std::ptr::copy_nonoverlapping(regs.as_ptr(), Jit_Regs(self.ptr).cast(), 16);
+            }
+        }
+
+        /// Get raw FP/SIMD registers in units of u32.
+        #[inline]
+        pub fn get_extregs(&self) -> &[u32; 64] {
+            unsafe { std::slice::from_raw_parts::<u32>(Jit_ExtRegs(self.ptr).cast(), 64).try_into().unwrap_unchecked() }
+        }
+
+        /// Replace FP/SIMD registers.
+        #[inline]
+        pub fn set_extregs(&self, regs: [u32; 64]) {
+            unsafe {
+                std::ptr::copy_nonoverlapping(regs.as_ptr(), Jit_ExtRegs(self.ptr).cast(), 64);
+            }
+        }
+
+        #[inline]
+        pub fn get_reg(&self, index: usize) -> u32 {
+            self.get_regs()[index]
+        }
+
+        #[inline]
+        pub fn set_reg(&mut self, index: usize, val: u32) {
+            unsafe { std::slice::from_raw_parts_mut::<u32>(Jit_Regs(self.ptr).cast(), 16)[index] = val }
+        }
+
+        /// Read Stack Pointer
+        #[inline]
+        pub fn get_sp(&self) -> u32 {
+            self.get_reg(13)
+        }
+
+        /// Modify Stack Pointer
+        #[inline]
+        pub fn set_sp(&mut self, sp: u32) {
+            self.set_reg(13, sp)
+        }
+
+        /// Read Program Counter
+        #[inline]
+        pub fn get_pc(&self) -> u32 {
+            self.get_reg(15)
+        }
+
+        /// Modify Program Counter
+        #[inline]
+        pub fn set_pc(&mut self, pc: u32) {
+            self.set_reg(15, pc)
+        }
+
+        /// View CPSR
+        #[inline]
+        pub fn get_cpsr(&self) -> u32 {
+            unsafe { Jit_Cpsr(self.ptr) }
+        }
+
+        /// Modify CPSR
+        #[inline]
+        pub fn set_cpsr(&mut self, val: u32) {
+            unsafe { Jit_SetCpsr(self.ptr, val) }
+        }
+
+        /// View FPSCR
+        #[inline]
+        pub fn get_fpscr(&self) -> u32 {
+            unsafe { Jit_Fpscr(self.ptr) }
+        }
+
+        /// Modify FPSCR
+        #[inline]
+        pub fn set_fpscr(&mut self, val: u32) {
+            unsafe { Jit_SetFpscr(self.ptr, val) }
+        }
+
+        /// Clears exclusive states for this core.
+        #[inline]
+        pub fn clear_exclusive_state(&mut self) {
+            unsafe { Jit_ClearExclusiveState(self.ptr) }
+        }
+
+        /// Returns true if Jit::Run was called but hasn't returned yet.
+        /// i.e; we're in a callback
+        #[inline]
+        pub fn is_executing(&self) -> bool {
+            unsafe { (*self.ptr).is_executing }
+        }
+
+        /// Dumps the disassembly of all compiled code to stdout.
+        #[inline]
+        pub fn dump_disassembly(&self) {
+            unsafe { Jit_DumpDisassembly(self.ptr) }
+        }
+
+        /// Disassemble the instructions following the current pc and return
+        /// the resulting instructions as a vector of their string representations.
+        #[inline]
+        pub fn disassemble(&self) -> crate::internal::cpp_vector<crate::internal::cpp_string, crate::internal::cpp_allocator> {
+            unsafe { std::mem::transmute(Jit_Disassemble(self.ptr)) } // safety: compile-time checks verify vector size
         }
     }
 }
@@ -766,11 +895,13 @@ pub mod a32 {
 pub mod a64 {
     use std::marker::PhantomData;
     use std::mem::MaybeUninit;
+    use crate::HaltReason;
     pub use super::internal::root::Dynarmic::A64::{
-        DataCacheOperation, Exception, InstructionCacheOperation, VAddr, Vector,
+        DataCacheOperation, Exception, InstructionCacheOperation, VAddr,
     };
     use crate::internal::cpp_optional;
-    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit, A64::Jit};
+    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit, A64::Jit as Jit_I};
+    use crate::internal::root::Dynarmic::A64::*;
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
@@ -1272,14 +1403,12 @@ pub mod a64 {
         }
     }
 
-    // see a32::JitBox for why this is necessary
-    /// Smart pointer for dynarmic's A64 Jit
-    pub struct JitBox<'callbacks> {
-        ptr: *mut Jit,
+    pub struct Jit<'callbacks> {
+        ptr: *mut Jit_I,
         lifetime: PhantomData<&'callbacks ()> // lifetime for UserCallbacks
     }
 
-    impl Drop for JitBox<'_> {
+    impl Drop for Jit<'_> {
         fn drop(&mut self) {
             unsafe {
                 delete_a64_jit(self.ptr);
@@ -1287,30 +1416,198 @@ pub mod a64 {
         }
     }
 
-    impl super::Deref for JitBox<'_> {
-        type Target = Jit;
-        fn deref(&self) -> &Self::Target {
-            unsafe { &*self.ptr }
-        }
-    }
+    impl<'callbacks> Jit<'callbacks> {
 
-    impl super::DerefMut for JitBox<'_> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
+        /// Creates a new A64 Jit instance.
+        /// # Safety
+        /// - A valid [UserConfig] and [UserCallbacks] must be inputted. This ensures the safety of any other functions for Jit.
+        pub unsafe fn new(mut conf: UserConfig<'callbacks>) -> Jit<'callbacks> {
             unsafe {
-                &mut *self.ptr
-            }
-        }
-    }
-
-    impl<'callbacks> JitBox<'callbacks> {
-        // see comments for a32's JitBox::new for why this is necessary
-        pub unsafe fn new(mut conf: UserConfig<'callbacks>) -> JitBox<'callbacks> {
-            unsafe {
-                JitBox {
+                Jit {
                     ptr: new_a64_jit(&mut conf as *mut UserConfig),
                     lifetime: PhantomData,
                 }
             }
+        }
+
+        /// Runs the emulated CPU.
+        /// Cannot be recursively called.
+        #[inline]
+        pub fn run(&mut self) -> HaltReason {
+            unsafe { Jit_Run(self.ptr) }
+        }
+
+        /// Step the emulated CPU for one instruction.
+        /// Cannot be recursively called.
+        #[inline]
+        pub fn step(&mut self) -> HaltReason {
+            unsafe { Jit_Step(self.ptr) }
+        }
+
+        /// Clears the code cache of all compiled code.
+        /// Can be called at any time. Halts execution if called within a callback.
+        #[inline]
+        pub fn clear_cache(&mut self) {
+            unsafe { Jit_ClearCache(self.ptr) }
+        }
+
+        /// Reset CPU state to state at startup. Does not clear code cache.
+        /// Cannot be called from a callback.
+        #[inline]
+        pub fn reset(&mut self) {
+            unsafe { Jit_Reset(self.ptr) }
+        }
+
+        /// Stops execution during [Jit::run].
+        #[inline]
+        pub unsafe fn halt(&mut self, hr: HaltReason) {
+            unsafe { Jit_HaltExecution(self.ptr, hr) }
+        }
+
+        /// Clears a halt reason from flags.
+        #[inline]
+        pub unsafe fn clear_halt(&mut self, hr: HaltReason) {
+            unsafe { Jit_ClearHalt(self.ptr, hr) }
+        }
+
+        /// Read Stack Pointer
+        #[inline]
+        pub fn get_sp(&self) -> u64 {
+            unsafe { Jit_GetSP(self.ptr) }
+        }
+
+        /// Modify Stack Pointer
+        #[inline]
+        pub fn set_sp(&mut self, sp: u64) {
+            unsafe { Jit_SetSP(self.ptr, sp) }
+        }
+
+        /// Read Program Counter
+        #[inline]
+        pub fn get_pc(&self) -> u64 {
+            unsafe { Jit_GetPC(self.ptr) }
+        }
+
+        /// Modify Program Counter
+        #[inline]
+        pub fn set_pc(&mut self, pc: u64) {
+            unsafe { Jit_SetPC(self.ptr, pc) }
+        }
+
+        /// Read general-purpose register. (GPR)
+        #[inline]
+        pub fn get_reg(&self, index: usize) -> u64 {
+            unsafe { Jit_GetRegister(self.ptr, index) }
+        }
+
+        /// Read the low 32-bits of a GPR.
+        #[inline]
+        pub fn get_wreg(&self, index: usize) -> u32 {
+            self.get_reg(index) as u32
+        }
+
+        /// Modify general-purpose register. (GPR)
+        #[inline]
+        pub fn set_reg(&mut self, index: usize, val: u64) {
+            unsafe { Jit_SetRegister(self.ptr, index, val) }
+        }
+
+        /// Read all general-purpose registers.
+        #[inline]
+        pub fn get_regs(&self) -> [u64; 31] {
+            unsafe {
+                // todo: bindgen can't generate std::array (even though it's the same size as a C/Rust one?) so the return value of GetRegisters is just u8..
+                let og = Jit_GetRegisters as unsafe extern "C" fn (*const Jit_I) -> u8;
+                let func: unsafe extern "C" fn(*const Jit_I) -> [u64; 31] = std::mem::transmute(og);
+
+                func(self.ptr)
+            }
+        }
+
+        /// Replace all general-purpose registers.
+        #[inline]
+        pub fn set_regs(&mut self, regs: &[u64; 31]) {
+            unsafe { Jit_SetRegisters(self.ptr, regs.as_ptr().cast()) }
+        }
+
+        /// Read floating point and SIMD register.
+        #[inline]
+        pub fn get_vector(&self, index: usize) -> u128 {
+            unsafe { Jit_GetVector(self.ptr, index) }
+        }
+
+        /// Modify floating point/SIMD register. (GPR)
+        #[inline]
+        pub fn set_vector(&mut self, index: usize, val: u128) {
+            unsafe { Jit_SetVector(self.ptr, index, val) }
+        }
+
+        /// Read all floating point and SIMD registers.
+        #[inline]
+        pub fn get_vectors(&self) -> [u128; 32] {
+            unsafe {
+                // todo: bindgen can't generate std::array (even though it's the same size as a C/Rust one?) so the return value of GetRegisters is just u8..
+                let og = Jit_GetVectors as unsafe extern "C" fn (*const Jit_I) -> u8;
+                let func: unsafe extern "C" fn(*const Jit_I) -> [u128; 32] = std::mem::transmute(og);
+
+                func(self.ptr)
+            }
+        }
+
+        /// Replace all general-purpose registers.
+        #[inline]
+        pub fn set_vectors(&mut self, regs: &[u128; 32]) {
+            unsafe { Jit_SetRegisters(self.ptr, regs.as_ptr().cast()) }
+        }
+
+        /// View FPCR
+        #[inline]
+        pub fn get_fpcr(&self) -> u32 {
+            unsafe { Jit_GetFpcr(self.ptr) }
+        }
+
+        /// Modify FPCR
+        #[inline]
+        pub fn set_fpcr(&mut self, val: u32) {
+            unsafe { Jit_SetFpcr(self.ptr, val) }
+        }
+
+        /// View PSTATE
+        #[inline]
+        pub fn get_pstate(&self) -> u32 {
+            unsafe { Jit_GetPstate(self.ptr) }
+        }
+
+        /// Modify FPCR
+        #[inline]
+        pub fn set_pstate(&mut self, val: u32) {
+            unsafe { Jit_SetPstate(self.ptr, val) }
+        }
+
+        /// Clears exclusive states for this core.
+        #[inline]
+        pub fn clear_exclusive_state(&mut self) {
+            unsafe { Jit_ClearExclusiveState(self.ptr) }
+        }
+
+        /// Returns true if Jit::Run was called but hasn't returned yet.
+        /// i.e; we're in a callback
+        #[inline]
+        pub fn is_executing(&self) -> bool {
+            unsafe { Jit_IsExecuting(self.ptr) }
+        }
+
+        /// Dumps the disassembly of all compiled code to stdout.
+        #[inline]
+        pub fn dump_disassembly(&self) {
+            unsafe { Jit_DumpDisassembly(self.ptr) }
+        }
+
+        /// Disassemble the instructions following the current pc and return
+        /// the resulting instructions as a vector of their string representations.
+        #[inline]
+        pub fn disassemble(&self) -> crate::internal::cpp_vector<crate::internal::cpp_string, crate::internal::cpp_allocator> {
+            unsafe { std::mem::transmute(Jit_Disassemble(self.ptr)) } // safety: compile-time checks verify vector size
         }
     }
 }

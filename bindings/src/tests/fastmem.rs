@@ -1,9 +1,8 @@
 mod a64 {
-    use std::cmp::Ordering;
-    use std::ffi::{CStr, CString};
-    use crate::a64::{JitBox, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr, Vector};
+    use crate::a64::{Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
     use crate::tests::unimplemented;
+    use std::cmp::Ordering;
 
     #[repr(C)]
     struct A64FastmemTestEnv {
@@ -83,7 +82,7 @@ mod a64 {
         let env = unsafe { &mut *env.cast::<A64FastmemTestEnv>() };
         env.write(vaddr, val);
     }
-    unsafe extern "C" fn memory_write_128(env: *mut UserCallbacks, vaddr: VAddr, val: Vector) {
+    unsafe extern "C" fn memory_write_128(env: *mut UserCallbacks, vaddr: VAddr, val: u128) {
         let env = unsafe { &mut *env.cast::<A64FastmemTestEnv>() };
         env.write(vaddr, val);
     }
@@ -175,26 +174,26 @@ mod a64 {
             config.silently_mirror_fastmem = true;
             config.processor_id = 0;
 
-            let mut jit = JitBox::new(config);
-            std::ptr::copy_nonoverlapping(CString::new("Lorem ipsum dolor sit amet, consectetur adipiscing elit.").unwrap().as_ptr().cast(), ptr.add(0x100), 57);
+            let mut jit = Jit::new(config);
+            std::ptr::copy_nonoverlapping(std::ffi::CString::new("Lorem ipsum dolor sit amet, consectetur adipiscing elit.").unwrap().as_ptr().cast(), ptr.add(0x100), 57);
 
             *ptr.add(0).cast::<u32>() = 0xA9401404;  // LDP x4, x5, [x0]
             *ptr.add(4).cast::<u32>() = 0xF9400046;  // LDR x6, [x2]
             *ptr.add(8).cast::<u32>() = 0xA9001424;  // STP x4, x5, [x1]
             *ptr.add(12).cast::<u32>() = 0xF9000066; // STR x6, [x3]
             *ptr.add(16).cast::<u32>() = 0x14000000; // B .
-            jit.SetRegister(0, 0x100);
-            jit.SetRegister(1, 0x1F0);
-            jit.SetRegister(2, 0x10F);
-            jit.SetRegister(3, 0x1FF);
+            jit.set_reg(0, 0x100);
+            jit.set_reg(1, 0x1F0);
+            jit.set_reg(2, 0x10F);
+            jit.set_reg(3, 0x1FF);
 
-            jit.SetPC(0);
-            jit.SetSP(memory_size as u64 - 1u64);
-            jit.SetFpsr(0x03480000);
-            jit.SetPstate(0x30000000);
+            jit.set_pc(0);
+            jit.set_sp(memory_size as u64 - 1u64);
+            jit.set_fpcr(0x03480000);
+            jit.set_pstate(0x30000000);
             env.ticks_left = 5;
 
-            jit.Run();
+            jit.run();
 
             assert_eq!(std::slice::from_raw_parts(ptr.add(0x100), 23).cmp(std::slice::from_raw_parts(ptr.add(0x1F0), 23)), Ordering::Equal);
         }
