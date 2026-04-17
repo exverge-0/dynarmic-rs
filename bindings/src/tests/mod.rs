@@ -23,7 +23,7 @@ mod a32 {
     }
     const _: () = assert!(std::mem::offset_of!(ArmTestEnv, base) == 0);
 
-    #[cfg(itanium_abi)]
+    #[cfg(not(target_env = "msvc"))]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         addr: VAddr,
@@ -36,7 +36,7 @@ mod a32 {
 
         0xEAFFFFFE.into()
     }
-    #[cfg(msvc_abi)]
+    #[cfg(target_env = "msvc")]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         out: *mut cpp_optional<u32>,
@@ -191,7 +191,7 @@ mod a64 {
 
     const _: () = assert!(std::mem::offset_of!(A64TestEnv, base) == 0);
 
-    #[cfg(itanium_abi)]
+    #[cfg(not(target_env = "msvc"))]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         addr: VAddr,
@@ -205,7 +205,7 @@ mod a64 {
         let index = (addr - env.code_mem_start_addr) as usize / 4;
         (*env.code_mem.get(index).unwrap()).into()
     }
-    #[cfg(msvc_abi)]
+    #[cfg(target_env = "msvc")]
     unsafe extern "C" fn memory_read_code(
         data: *mut UserCallbacks,
         out: *mut cpp_optional<u32>,

@@ -97,14 +97,4 @@ fn main() {
         .file("wrapper.cpp")
         .include(format!("{}/include", dst.display()))
         .compile("wrapper");
-
-    if !cfg!(target_env = "msvc") {
-        // assume we're clang/gcc
-        println!("cargo:rustc-cfg=itanium_abi");
-    } else {
-        println!("cargo:rustc-cfg=msvc_abi");
-    }
-
-    println!("cargo::rustc-check-cfg=cfg(itanium_abi)");
-    println!("cargo::rustc-check-cfg=cfg(msvc_abi)");
 }

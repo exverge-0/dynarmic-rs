@@ -33,13 +33,13 @@ mod a64 {
         }
     }
 
-    #[cfg(itanium_abi)]
+    #[cfg(not(target_env = "msvc"))]
     unsafe extern "C" fn memory_read_code(env: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
         let env = unsafe { &*env.cast::<A64FastmemTestEnv>() };
         env.read::<u32>(vaddr).into()
     }
 
-    #[cfg(msvc_abi)]
+    #[cfg(target_env = "msvc")]
     unsafe extern "C" fn memory_read_code(env: *mut UserCallbacks, out: *mut cpp_optional<u32>, vaddr: VAddr) {
         let env = unsafe { &*env.cast::<A64FastmemTestEnv>() };
         *out = env.read::<u32>(vaddr).into()

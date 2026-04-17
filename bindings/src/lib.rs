@@ -244,7 +244,7 @@ pub mod a32 {
         vaddr: VAddr,
     ) {
         unsafe {
-            if cfg!(itanium_abi) {
+            if cfg!(not(target_env = "msvc")) {
                 *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
@@ -257,7 +257,7 @@ pub mod a32 {
             }
         }
     }
-    #[cfg(itanium_abi)]
+    #[cfg(not(target_env = "msvc"))]
     unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
         unsafe {
             let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
@@ -276,18 +276,18 @@ pub mod a32 {
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks but with real functions, so this should always be 0 as UserCallbacks and TranslateCallbacks have no fields
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         typeinfo: crate::TypeInfoPtr,
 
         // TranslateCallbacks
 
         // https://github.com/rust-lang/rust/issues/38258
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-        #[cfg(msvc_abi)]
+        #[cfg(target_env = "msvc")]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr)>,
 
@@ -299,7 +299,7 @@ pub mod a32 {
 
         // these functions should never be called; UserCallbacks should always be owned by Rust
         cpp_destructor: Option<unsafe extern "C" fn()>,
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         itanium_destructor: Option<unsafe extern "C" fn()>,
 
         // UserCallbacks
@@ -336,7 +336,7 @@ pub mod a32 {
     }
 
     impl UserCallbacksVTable {
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         pub const fn new(
             memory_read_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
@@ -474,7 +474,7 @@ pub mod a32 {
             value
         }
 
-        #[cfg(msvc_abi)]
+        #[cfg(target_env = "msvc")]
         pub const fn new(
             memory_read_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr),
@@ -613,7 +613,7 @@ pub mod a32 {
     impl UserCallbacks {
         pub fn new(vtable: &'static UserCallbacksVTable) -> Self {
             unsafe {
-                if cfg!(itanium_abi) {
+                if cfg!(not(target_env = "msvc")) {
                     Self {
                         // skip typeinfo data
                         __vtable: std::mem::transmute::<
@@ -887,7 +887,19 @@ pub mod a32 {
         /// the resulting instructions as a vector of their string representations.
         #[inline]
         pub fn disassemble(&self) -> crate::internal::cpp_vector<crate::internal::cpp_string, crate::internal::cpp_allocator> {
-            unsafe { std::mem::transmute(Jit_Disassemble(self.ptr)) } // safety: compile-time checks verify vector size
+            unsafe {
+                if cfg!(not(target_env = "msvc")) {
+                    std::mem::transmute(Jit_Disassemble(self.ptr)) // safety: compile-time checks verify vector size
+                } else {
+                    // fix function signature to reflect msvc abi
+                    let og = Jit_Disassemble as unsafe extern "C" fn(*const Jit_I) -> _;
+                    let func: unsafe extern "C" fn(*const Jit_I, *mut crate::internal::cpp_vector<crate::internal::cpp_string, crate::internal::cpp_allocator>) = std::mem::transmute(og);
+
+                    let mut vector = MaybeUninit::uninit();
+                    func(self.ptr, vector.as_mut_ptr());
+                    vector.assume_init()
+                }
+            }
         }
     }
 }
@@ -905,21 +917,21 @@ pub mod a64 {
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks but with real functions, so this should always be 0 as UserCallbacks has no fields
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         typeinfo: crate::TypeInfoPtr,
 
         // these functions should never be called; UserCallbacks should always be owned by Rust
         cpp_destructor: Option<unsafe extern "C" fn()>,
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         itanium_destructor: Option<unsafe extern "C" fn()>,
 
         // https://github.com/rust-lang/rust/issues/38258
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>>,
-        #[cfg(msvc_abi)]
+        #[cfg(target_env = "msvc")]
         memory_read_code:
             Option<unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr)>,
 
@@ -967,7 +979,7 @@ pub mod a64 {
         vaddr: VAddr,
     ) {
         unsafe {
-            if cfg!(itanium_abi) {
+            if cfg!(not(target_env = "msvc")) {
                 *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
                     .memory_read_32
                     .unwrap()(this, vaddr)
@@ -981,7 +993,7 @@ pub mod a64 {
         }
     }
 
-    #[cfg(itanium_abi)]
+    #[cfg(not(target_env = "msvc"))]
     unsafe extern "C" fn memory_read_code_itanium(this: *mut UserCallbacks, vaddr: VAddr) -> cpp_optional<u32> {
         unsafe {
             let mut uninit: MaybeUninit<cpp_optional<u32>> = MaybeUninit::uninit();
@@ -991,7 +1003,7 @@ pub mod a64 {
     }
 
     impl UserCallbacksVTable {
-        #[cfg(itanium_abi)]
+        #[cfg(not(target_env = "msvc"))]
         pub const fn new(
             memory_read_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, VAddr) -> cpp_optional<u32>,
@@ -1135,7 +1147,7 @@ pub mod a64 {
             value
         }
 
-        #[cfg(msvc_abi)]
+        #[cfg(target_env = "msvc")]
         pub const fn new(
             memory_read_code: Option<
                 unsafe extern "C" fn(*mut UserCallbacks, *mut cpp_optional<u32>, VAddr),
@@ -1280,7 +1292,7 @@ pub mod a64 {
     impl UserCallbacks {
         pub fn new(vtable: &'static UserCallbacksVTable) -> Self {
             unsafe {
-                if cfg!(itanium_abi) {
+                if cfg!(not(target_env = "msvc")) {
                     Self {
                         // skip typeinfo data
                         __vtable: std::mem::transmute::<
@@ -1546,7 +1558,7 @@ pub mod a64 {
         #[inline]
         pub fn get_vectors(&self) -> [u128; 32] {
             unsafe {
-                // todo: bindgen can't generate std::array (even though it's the same size as a C/Rust one?) so the return value of GetRegisters is just u8..
+                // bindgen can't generate std::array (even though it's the same size as a C/Rust one?) so the return value of GetRegisters is just u8..
                 let og = Jit_GetVectors as unsafe extern "C" fn (*const Jit_I) -> u8;
                 let func: unsafe extern "C" fn(*const Jit_I) -> [u128; 32] = std::mem::transmute(og);
 
@@ -1607,7 +1619,19 @@ pub mod a64 {
         /// the resulting instructions as a vector of their string representations.
         #[inline]
         pub fn disassemble(&self) -> crate::internal::cpp_vector<crate::internal::cpp_string, crate::internal::cpp_allocator> {
-            unsafe { std::mem::transmute(Jit_Disassemble(self.ptr)) } // safety: compile-time checks verify vector size
+            unsafe {
+                if cfg!(not(target_env = "msvc")) {
+                    std::mem::transmute(Jit_Disassemble(self.ptr)) // safety: compile-time checks verify vector size
+                } else {
+                    // fix function signature to reflect msvc abi
+                    let og = Jit_Disassemble as unsafe extern "C" fn(*const Jit_I) -> _;
+                    let func: unsafe extern "C" fn(*const Jit_I, *mut crate::internal::cpp_vector<crate::internal::cpp_string, crate::internal::cpp_allocator>) = std::mem::transmute(og);
+
+                    let mut vector = MaybeUninit::uninit();
+                    func(self.ptr, vector.as_mut_ptr());
+                    vector.assume_init()
+                }
+            }
         }
     }
 }
