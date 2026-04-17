@@ -1,6 +1,6 @@
 [package]
 name = "dynarmic-bindings"
-version = "0.4.1"
+version = "0.1.0"
 edition = "2024"
 links = "dynarmic"
 description = "Bindings for an ARM dynamic recompiler"
