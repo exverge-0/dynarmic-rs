@@ -1497,7 +1497,7 @@ pub mod a64 {
         /// Read general-purpose register. (GPR)
         #[inline]
         pub fn get_reg(&self, index: usize) -> u64 {
-            unsafe { Jit_GetRegister(self.ptr, index) }
+            unsafe { Jit_GetRegister(self.ptr, index as _) }
         }
 
         /// Read the low 32-bits of a GPR.
@@ -1509,7 +1509,7 @@ pub mod a64 {
         /// Modify general-purpose register. (GPR)
         #[inline]
         pub fn set_reg(&mut self, index: usize, val: u64) {
-            unsafe { Jit_SetRegister(self.ptr, index, val) }
+            unsafe { Jit_SetRegister(self.ptr, index as _, val) }
         }
 
         /// Read all general-purpose registers.
@@ -1533,13 +1533,13 @@ pub mod a64 {
         /// Read floating point and SIMD register.
         #[inline]
         pub fn get_vector(&self, index: usize) -> u128 {
-            unsafe { Jit_GetVector(self.ptr, index) }
+            unsafe { Jit_GetVector(self.ptr, index as _) }
         }
 
         /// Modify floating point/SIMD register. (GPR)
         #[inline]
         pub fn set_vector(&mut self, index: usize, val: u128) {
-            unsafe { Jit_SetVector(self.ptr, index, val) }
+            unsafe { Jit_SetVector(self.ptr, index as _, val) }
         }
 
         /// Read all floating point and SIMD registers.
