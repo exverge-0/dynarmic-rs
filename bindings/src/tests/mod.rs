@@ -133,15 +133,15 @@ mod a32 {
         fn is_in_codemem(&self, vaddr: u32) -> bool {
             (vaddr as usize) < 4 * self.code_mem.len()
         }
-        fn new() -> Pin<Box<Self>> {
-            Box::pin(ArmTestEnv {
+        fn new() -> Self {
+            ArmTestEnv {
                 base: UserCallbacks::new(&ArmTestEnv_CALLBACKS),
                 ticks_left: 0,
                 code_mem_modified_by_guest: false,
                 code_mem: vec![],
                 modified_memory: BTreeMap::new(),
                 interrupts: vec![],
-            })
+            }
         }
     }
 
@@ -379,8 +379,8 @@ mod a64 {
             vaddr >= self.code_mem_start_addr
                 && vaddr < self.code_mem_start_addr + self.code_mem.len() as u64 * 4
         }
-        fn new() -> Pin<Box<Self>> {
-            Box::pin(A64TestEnv {
+        fn new() -> Self {
+            A64TestEnv {
                 base: UserCallbacks::new(&A64TestEnv_CALLBACKS),
                 ticks_left: 0,
                 code_mem_modified_by_guest: false,
@@ -388,7 +388,7 @@ mod a64 {
                 code_mem: vec![],
                 modified_memory: BTreeMap::new(),
                 interrupts: vec![],
-            })
+            }
         }
     }
 

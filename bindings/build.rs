@@ -93,6 +93,7 @@ fn main() {
     // Compile constants and FFI helper functions
     cc::Build::new()
         .cpp(true)
+        .flag("-Wno-dynamic-class-memaccess")
         .std("c++20")
         .file("wrapper.cpp")
         .include(format!("{}/include", dst.display()))

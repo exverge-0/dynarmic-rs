@@ -174,7 +174,6 @@ pub mod internal {
 
 use bitflags::bitflags;
 pub use internal::root::Dynarmic::{ExclusiveMonitor, HaltReason};
-use std::ops::{Deref, DerefMut};
 
 bitflags! {
     #[repr(transparent)]
