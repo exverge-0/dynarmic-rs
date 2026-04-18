@@ -765,8 +765,9 @@ pub mod a32 {
         /// Cannot be recursively called.
         /// # Safety:
         /// - All instructions and memory addresses inputted must be valid. Invalid addresses/instructions will cause dynarmic exceptions, which panic by default.
+        /// - Some ARM coprocessor instructions may be forwarded to [Coprocessor] callbacks; if these are unhandled (e.g. no coprocessors provided), this may result in a C++ exception, making this function inheriently unsafe.
         #[inline]
-        pub fn run(&mut self) -> HaltReason {
+        pub unsafe fn run(&mut self) -> HaltReason {
             unsafe { Jit_Run(self.ptr) }
         }
 
