@@ -175,7 +175,7 @@ pub mod internal {
     const VTABLE_DIFF: usize = 0;
 
     #[cfg(not(target_env = "msvc"))]
-    pub(crate) const VTABLE_DIFF: usize = 2;
+    pub(crate) const VTABLE_DIFF: usize = 16;
 }
 
 use bitflags::bitflags;
