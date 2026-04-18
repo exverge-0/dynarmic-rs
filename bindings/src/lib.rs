@@ -219,6 +219,7 @@ extern "C" fn usercallbacks_destructor() {
 }
 
 #[repr(transparent)]
+#[allow(unused)]
 struct TypeInfoPtr(*const ());
 unsafe impl Send for TypeInfoPtr {}
 unsafe impl Sync for TypeInfoPtr {}
