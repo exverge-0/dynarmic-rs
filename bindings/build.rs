@@ -1,6 +1,9 @@
 use std::env::var;
 use std::path::PathBuf;
 
+#[cfg(all(not(target_env = "msvc"), not(target_env = ""), not(target_env = "gnu")))]
+compile_error!("Unsupported compiler; dynarmic only supports MSVC and Itanium-ABI (GNU/Clang) compilers.");
+
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.hpp");
 
@@ -93,7 +96,7 @@ fn main() {
     // Compile constants and FFI helper functions
     cc::Build::new()
         .cpp(true)
-        .flag("-Wno-dynamic-class-memaccess")
+        .flag(if cfg!(target_env = "msvc") { "" } else { "-Wno-dynamic-class-memaccess" })
         .std("c++20")
         .file("wrapper.cpp")
         .include(format!("{}/include", dst.display()))
