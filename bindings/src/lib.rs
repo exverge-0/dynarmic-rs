@@ -15,7 +15,7 @@ pub mod internal {
     }
     use crate::a32::Coprocessor;
     pub(crate) use bindings::*;
-    pub(crate) use root::std::{string as cpp_string, allocator as cpp_allocator};
+    pub(crate) use root::std::{allocator as cpp_allocator, string as cpp_string};
 
     /// Rust struct representing C++ `std::vector<T, Allocator>`.
     /// This type cannot be constructed in Rust.
@@ -170,6 +170,12 @@ pub mod internal {
             "Failed to verify size of type a32::cpp_shared_ptr"
         )
     };
+
+    #[cfg(target_env = "msvc")]
+    const VTABLE_DIFF: usize = 0;
+
+    #[cfg(not(target_env = "msvc"))]
+    pub(crate) const VTABLE_DIFF: usize = 2;
 }
 
 use bitflags::bitflags;
@@ -226,15 +232,15 @@ unsafe extern "C" fn default_false(_: *mut ()) -> bool {
 unsafe extern "C" fn default_void(_: *mut ()) {}
 
 pub mod a32 {
-    use std::marker::PhantomData;
     pub use super::internal::root::Dynarmic::A32::{
         ArchVersion, CoprocReg, Coprocessor, Coprocessor__bindgen_vtable as CoprocessorVTable,
         Exception, IREmitter, VAddr,
     };
-    use crate::internal::root::Dynarmic::{delete_a32_jit, new_a32_jit, A32::Jit as Jit_I};
     use crate::internal::root::Dynarmic::A32::*;
+    use crate::internal::root::Dynarmic::{delete_a32_jit, new_a32_jit, A32::Jit as Jit_I};
     use crate::internal::{cpp_optional, cpp_shared_ptr};
     use crate::{HaltReason, OptimizationFlag};
+    use std::marker::PhantomData;
     use std::mem::MaybeUninit;
 
     unsafe extern "C" fn memory_read_code(
@@ -243,17 +249,10 @@ pub mod a32 {
         vaddr: VAddr,
     ) {
         unsafe {
-            if cfg!(not(target_env = "msvc")) {
-                *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
-                    .memory_read_32
-                    .unwrap()(this, vaddr)
+            *out = (*((*this).__vtable.byte_sub(crate::internal::VTABLE_DIFF) as *const UserCallbacksVTable))
+                .memory_read_32
+                .unwrap()(this, vaddr)
                 .into()
-            } else {
-                *out = (*((*this).__vtable as *const UserCallbacksVTable))
-                    .memory_read_32
-                    .unwrap()(this, vaddr)
-                .into()
-            }
         }
     }
     #[cfg(not(target_env = "msvc"))]
@@ -271,6 +270,19 @@ pub mod a32 {
         _: u32,
     ) -> u64 {
         1
+    }
+
+    unsafe extern "C" fn exception_raised(_: *mut UserCallbacks, addr: VAddr, exc: Exception) {
+        panic!("dynarmic-bindings: Unhandled exception '{:?}' at '0x{:X}'", exc, addr)
+    }
+
+    unsafe extern "C" fn interpreter_fallback(cb: *mut UserCallbacks, addr: VAddr, num: usize) {
+        let func = &*(*cb).__vtable.byte_sub(crate::internal::VTABLE_DIFF).cast::<UserCallbacksVTable>();
+        panic!("dynarmic-bindings: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'", func.memory_read_32.unwrap()(cb, addr), num, addr)
+    }
+
+    unsafe extern "C" fn call_svc(_: *mut UserCallbacks, svc: u32) {
+        panic!("dynarmic-bindings: Unhandled supervisor call '{}'", svc)
     }
 
     #[repr(C)]
@@ -331,7 +343,7 @@ pub mod a32 {
     #[repr(C)]
     pub struct UserCallbacks {
         __vtable: *const *const (),
-        __copy: std::marker::PhantomData<*mut ()>, // prevent UserCallbacks from being Send/Sync
+        __copy: PhantomData<*mut ()>, // prevent UserCallbacks from being Send/Sync
     }
 
     impl UserCallbacksVTable {
@@ -470,6 +482,15 @@ pub mod a32 {
                     ))
                 }
             }
+            if value.exception_raised.is_none() {
+                value.exception_raised = Some(super::a32::exception_raised);
+            }
+            if value.interpreter_fallback.is_none() {
+                value.interpreter_fallback = Some(super::a32::interpreter_fallback);
+            }
+            if value.call_svc.is_none() {
+                value.call_svc = Some(super::a32::call_svc);
+            }
             value
         }
 
@@ -605,6 +626,15 @@ pub mod a32 {
                     ))
                 }
             }
+            if value.exception_raised.is_none() {
+                value.exception_raised = Some(super::a32::exception_raised);
+            }
+            if value.interpreter_fallback.is_none() {
+                value.interpreter_fallback = Some(super::a32::interpreter_fallback);
+            }
+            if value.call_svc.is_none() {
+                value.call_svc = Some(super::a32::call_svc);
+            }
             value
         }
     }
@@ -612,21 +642,14 @@ pub mod a32 {
     impl UserCallbacks {
         pub fn new(vtable: &'static UserCallbacksVTable) -> Self {
             unsafe {
-                if cfg!(not(target_env = "msvc")) {
-                    Self {
-                        // skip typeinfo data
-                        __vtable: std::mem::transmute::<
-                            &'static UserCallbacksVTable,
-                            *const *const (),
-                        >(vtable)
-                        .add(2),
-                        __copy: std::marker::PhantomData,
-                    }
-                } else {
-                    Self {
-                        __vtable: std::mem::transmute(vtable),
-                        __copy: std::marker::PhantomData,
-                    }
+                Self {
+                    // skip typeinfo data on itanium
+                    __vtable: std::mem::transmute::<
+                        &'static UserCallbacksVTable,
+                        *const *const (),
+                    >(vtable)
+                        .byte_add(crate::internal::VTABLE_DIFF),
+                    __copy: PhantomData,
                 }
             }
         }
@@ -716,7 +739,7 @@ pub mod a32 {
 
     pub struct Jit<'callbacks> {
         ptr: *mut Jit_I,
-        lifetime: PhantomData<&'callbacks ()>
+        lifetime: PhantomData<&'callbacks ()>,
     }
 
     impl Drop for Jit<'_> {
@@ -732,13 +755,15 @@ pub mod a32 {
             unsafe {
                 Jit {
                     ptr: new_a32_jit(&mut conf as *mut UserConfig),
-                    lifetime: PhantomData
+                    lifetime: PhantomData,
                 }
             }
         }
 
         /// Runs the emulated CPU.
         /// Cannot be recursively called.
+        /// # Safety:
+        /// - All instructions and memory addresses inputted must be valid. Invalid addresses/instructions will cause dynarmic exceptions, which panic by default.
         #[inline]
         pub fn run(&mut self) -> HaltReason {
             unsafe { Jit_Run(self.ptr) }
@@ -904,15 +929,15 @@ pub mod a32 {
 }
 
 pub mod a64 {
-    use std::marker::PhantomData;
-    use std::mem::MaybeUninit;
-    use crate::HaltReason;
     pub use super::internal::root::Dynarmic::A64::{
         DataCacheOperation, Exception, InstructionCacheOperation, VAddr,
     };
     use crate::internal::cpp_optional;
-    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit, A64::Jit as Jit_I};
     use crate::internal::root::Dynarmic::A64::*;
+    use crate::internal::root::Dynarmic::{delete_a64_jit, new_a64_jit, A64::Jit as Jit_I};
+    use crate::HaltReason;
+    use std::marker::PhantomData;
+    use std::mem::MaybeUninit;
 
     #[repr(C)]
     pub struct UserCallbacksVTable {
@@ -978,17 +1003,10 @@ pub mod a64 {
         vaddr: VAddr,
     ) {
         unsafe {
-            if cfg!(not(target_env = "msvc")) {
-                *out = (*((*this).__vtable.sub(2) as *const UserCallbacksVTable))
-                    .memory_read_32
-                    .unwrap()(this, vaddr)
+            *out = (*((*this).__vtable.byte_sub(crate::internal::VTABLE_DIFF) as *const UserCallbacksVTable))
+                .memory_read_32
+                .unwrap()(this, vaddr)
                 .into()
-            } else {
-                *out = (*((*this).__vtable as *const UserCallbacksVTable))
-                    .memory_read_32
-                    .unwrap()(this, vaddr)
-                .into()
-            }
         }
     }
 
@@ -999,6 +1017,19 @@ pub mod a64 {
             memory_read_code(this, uninit.as_mut_ptr(), vaddr);
             uninit.assume_init()
         }
+    }
+
+    unsafe extern "C" fn exception_raised(_: *mut UserCallbacks, addr: VAddr, exc: Exception) {
+        panic!("dynarmic-bindings: Unhandled exception '{:?}' at '0x{:X}'", exc, addr)
+    }
+
+    unsafe extern "C" fn interpreter_fallback(cb: *mut UserCallbacks, addr: VAddr, num: usize) {
+        let func = &*(*cb).__vtable.byte_sub(crate::internal::VTABLE_DIFF).cast::<UserCallbacksVTable>();
+        panic!("dynarmic-bindings: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'", func.memory_read_32.unwrap()(cb, addr), num, addr)
+    }
+
+    unsafe extern "C" fn call_svc(_: *mut UserCallbacks, svc: u32) {
+        panic!("dynarmic-bindings: Unhandled supervisor call '{}'", svc)
     }
 
     impl UserCallbacksVTable {
@@ -1143,6 +1174,15 @@ pub mod a64 {
                     ))
                 }
             }
+            if value.exception_raised.is_none() {
+                value.exception_raised = Some(super::a64::exception_raised);
+            }
+            if value.interpreter_fallback.is_none() {
+                value.interpreter_fallback = Some(super::a64::interpreter_fallback);
+            }
+            if value.call_svc.is_none() {
+                value.call_svc = Some(super::a64::call_svc);
+            }
             value
         }
 
@@ -1284,6 +1324,15 @@ pub mod a64 {
                     ))
                 }
             }
+            if value.exception_raised.is_none() {
+                value.exception_raised = Some(super::a64::exception_raised);
+            }
+            if value.interpreter_fallback.is_none() {
+                value.interpreter_fallback = Some(super::a64::interpreter_fallback);
+            }
+            if value.call_svc.is_none() {
+                value.call_svc = Some(super::a64::call_svc);
+            }
             value
         }
     }
@@ -1291,21 +1340,14 @@ pub mod a64 {
     impl UserCallbacks {
         pub fn new(vtable: &'static UserCallbacksVTable) -> Self {
             unsafe {
-                if cfg!(not(target_env = "msvc")) {
-                    Self {
-                        // skip typeinfo data
-                        __vtable: std::mem::transmute::<
-                            &'static UserCallbacksVTable,
-                            *const *const (),
-                        >(vtable)
-                        .add(2),
-                        __copy: std::marker::PhantomData,
-                    }
-                } else {
-                    Self {
-                        __vtable: std::mem::transmute(vtable),
-                        __copy: std::marker::PhantomData,
-                    }
+                Self {
+                    // skip typeinfo data
+                    __vtable: std::mem::transmute::<
+                        &'static UserCallbacksVTable,
+                        *const *const (),
+                    >(vtable)
+                        .byte_add(crate::internal::VTABLE_DIFF),
+                    __copy: PhantomData,
                 }
             }
         }
@@ -1416,7 +1458,7 @@ pub mod a64 {
 
     pub struct Jit<'callbacks> {
         ptr: *mut Jit_I,
-        lifetime: PhantomData<&'callbacks ()> // lifetime for UserCallbacks
+        lifetime: PhantomData<&'callbacks ()>, // lifetime for UserCallbacks
     }
 
     impl Drop for Jit<'_> {
@@ -1428,7 +1470,6 @@ pub mod a64 {
     }
 
     impl<'callbacks> Jit<'callbacks> {
-
         /// Creates a new A64 Jit instance.
         /// # Safety
         /// - A valid [UserConfig] and [UserCallbacks] must be inputted. This ensures the safety of any other functions for Jit.
@@ -1528,7 +1569,7 @@ pub mod a64 {
         pub fn get_regs(&self) -> [u64; 31] {
             unsafe {
                 // todo: bindgen can't generate std::array (even though it's the same size as a C/Rust one?) so the return value of GetRegisters is just u8..
-                let og = Jit_GetRegisters as unsafe extern "C" fn (*const Jit_I) -> u8;
+                let og = Jit_GetRegisters as unsafe extern "C" fn(*const Jit_I) -> u8;
                 let func: unsafe extern "C" fn(*const Jit_I) -> [u64; 31] = std::mem::transmute(og);
 
                 func(self.ptr)
@@ -1558,7 +1599,7 @@ pub mod a64 {
         pub fn get_vectors(&self) -> [u128; 32] {
             unsafe {
                 // bindgen can't generate std::array (even though it's the same size as a C/Rust one?) so the return value of GetRegisters is just u8..
-                let og = Jit_GetVectors as unsafe extern "C" fn (*const Jit_I) -> u8;
+                let og = Jit_GetVectors as unsafe extern "C" fn(*const Jit_I) -> u8;
                 let func: unsafe extern "C" fn(*const Jit_I) -> [u128; 32] = std::mem::transmute(og);
 
                 func(self.ptr)

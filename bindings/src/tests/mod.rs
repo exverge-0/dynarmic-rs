@@ -1,11 +1,6 @@
 mod fastmem;
 
-unsafe extern "C" fn unimplemented() {
-    unimplemented!();
-}
-
 mod a32 {
-    use super::unimplemented;
     use crate::a32::{Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
     use std::collections::BTreeMap;
@@ -122,9 +117,9 @@ mod a32 {
         None,
         None,
         None,
-        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn ()) }),
-        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn ()) }),
-        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn ()) }),
+        None,
+        None,
+        None,
         None,
         Some(add_ticks),
         Some(get_ticks_remaining),
@@ -172,7 +167,6 @@ mod a32 {
 mod a64 {
     use crate::a64::{Jit, UserCallbacks, UserCallbacksVTable, UserConfig, VAddr};
     use crate::internal::cpp_optional;
-    use crate::tests::unimplemented;
     use std::collections::BTreeMap;
     use std::pin::Pin;
 
@@ -363,9 +357,9 @@ mod a64 {
         Some(memory_write_exclusive_64),
         Some(memory_write_exclusive_128),
         Some(is_readonly_memory),
-        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn()) }),
-        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn()) }),
-        Some(unsafe { std::mem::transmute(unimplemented as unsafe extern "C" fn()) }),
+        None,
+        None,
+        None,
         Some(data_cached_operation_raised),
         Some(instruction_cache_operation_raised),
         Some(instruction_synchronization_barrier_raised),
