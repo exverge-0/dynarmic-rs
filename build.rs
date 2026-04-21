@@ -5,13 +5,14 @@ use std::path::PathBuf;
 compile_error!("Unsupported compiler; dynarmic only supports MSVC and Itanium-ABI (GNU/Clang) compilers.");
 
 fn main() {
-    println!("cargo:rerun-if-changed=wrapper.hpp");
+    println!("cargo:rerun-if-changed=src/wrapper.hpp");
+    println!("cargo:rerun-if-changed=src/wrapper.cpp");
 
     // Compile dynarmic
-    let dst = cmake::Config::new("dynarmic/CMakeLists.txt")
+    let mut cmake = cmake::Config::new("dynarmic/CMakeLists.txt");
+    cmake
         .always_configure(false)
         .define("MASTER_PROJECT", "OFF")
-        .define("CMAKE_BUILD_TYPE", if var("PROFILE").unwrap() == "Release" { "Release" } else { "RelWithDebInfo" } )
         .define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON")
         .define("DYNARMIC_WARNINGS_AS_ERRORS", "OFF")
         .define(
@@ -23,16 +24,17 @@ fn main() {
                 .to_str()
                 .unwrap(),
         )
-        .generator("Ninja")
-        .build();
+        .generator("Ninja");
+
+    cmake.define("CMAKE_BUILD_TYPE", "RelWithDebInfo");
+
+    if var("CARGO_FEATURE_DEVIRTUALIZE").is_ok() {
+        cmake.define("DYNARMIC_RS_CUSTOM_EMIT_BEHAVIOR", "ON");
+    }
+    let dst = cmake.build();
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-lib=dynarmic");
-    if var("PROFILE").unwrap() == "Debug" {
-        println!("cargo:rustc-link-lib=fmtd");
-    } else {
-        println!("cargo:rustc-link-lib=fmt")
-    }
     println!("cargo:rustc-link-lib=fmt");
     println!("cargo:rustc-link-lib=mcl");
 
@@ -42,7 +44,7 @@ fn main() {
 
     // todo: what do we really generate here? we can manually bind everything else and drop the libclang dep
     let bindgen = bindgen::Builder::default()
-        .header("wrapper.hpp")
+        .header("src/wrapper.hpp")
         .enable_cxx_namespaces()
         .vtable_generation(true)
         .opaque_type("std::_.*")
@@ -57,18 +59,18 @@ fn main() {
         .blocklist_type("Dynarmic::OptimizationFlag")
         .module_raw_line(
             "root::std",
-            "pub use crate::internal::cpp_vector as vector;",
+            "pub use crate::CppVector as vector;",
         )
         .module_raw_line(
             "root::std",
-            "pub use crate::internal::cpp_optional as optional;",
+            "pub use crate::CppOptional as optional;",
         )
         .module_raw_line(
             "root::std",
-            "pub use crate::internal::cpp_shared_ptr as shared_ptr;",
+            "pub use crate::CppSharedPtr as shared_ptr;",
         )
-        .module_raw_line("root::Dynarmic::A64", "pub use crate::a64::UserConfig;")
-        .module_raw_line("root::Dynarmic::A32", "pub use crate::a32::UserConfig;")
+        .module_raw_line("root::Dynarmic::A64", "pub type UserConfig = crate::internal::A64Config<u8>;")
+        .module_raw_line("root::Dynarmic::A32", "pub type UserConfig = crate::internal::A32Config<u8>;")
         .module_raw_line("root::Dynarmic::A64", "pub type Vector = u128;")
         .module_raw_line("root::Dynarmic", "pub type Vector = u128;")
         .module_raw_line(
@@ -98,7 +100,7 @@ fn main() {
         .cpp(true)
         .flag(if cfg!(target_env = "msvc") { "" } else { "-Wno-dynamic-class-memaccess" })
         .std("c++20")
-        .file("wrapper.cpp")
+        .file("src/wrapper.cpp")
         .include(format!("{}/include", dst.display()))
         .compile("wrapper");
 }
