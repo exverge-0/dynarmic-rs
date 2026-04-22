@@ -4,16 +4,17 @@ use crate::internal::{cpp::A32::Jit as A32Jit, A32CallbacksVTable, A32Config, Ca
 use crate::{CppOptional, OptimizationFlag};
 use num_traits::{PrimInt, Unsigned};
 use std::mem::MaybeUninit;
+use std::ops::{Deref, DerefMut};
 
 /// Callback functions that dynarmic will use to access memory and
 /// when the code calls for a higher exception level (e.g. SVC calls)
 pub trait Callbacks : Sized {
     /// All reads through this callback are 4-byte aligned.
     /// Memory must be interpreted as little endian.
-    fn memory_read_code(cb: CallbackRef<Self>, addr: VAddr) -> Option<u32> { Some(Self::memory_read(cb, addr)) }
+    fn memory_read_code(cb: &mut CallbackRef<Self>, addr: VAddr) -> Option<u32> { Some(Self::memory_read(cb, addr)) }
 
     #[cfg(not(target_env = "msvc"))]
-    unsafe extern "C" fn memory_read_code_impl(cb: CallbackRef<Self>, addr: VAddr) -> CppOptional<u32> {
+    unsafe extern "C" fn memory_read_code_impl(cb: &mut CallbackRef<Self>, addr: VAddr) -> CppOptional<u32> {
         Self::memory_read_code(cb, addr).unwrap_or(0).into()
     }
     #[cfg(target_env = "msvc")]
@@ -28,32 +29,32 @@ pub trait Callbacks : Sized {
     /// By returning true the callee precludes the translation of the instruction;
     /// in such case the callee is responsible for setting the terminal.
     // TODO: IREmitter
-    extern "C" fn pre_code_read_hook(cb: CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _ir: &IREmitter) -> bool {
+    extern "C" fn pre_code_read_hook(_cb: &mut CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _ir: &IREmitter) -> bool {
         true
     }
 
     /// This function is called before the instruction at pc is interpreted.
     /// IR code can be emitted by the callee prior to translation of the instruction.
-    extern "C" fn pre_code_translation_hook(cb: CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _ir: &IREmitter) {}
+    extern "C" fn pre_code_translation_hook(_cb: &mut CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _ir: &IREmitter) {}
 
-    extern "C" fn get_ticks_for_code(cb: CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _instruct: u32) -> u64 {
+    extern "C" fn get_ticks_for_code(_cb: &mut CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _instruct: u32) -> u64 {
         1
     }
 
-    extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr) -> T;
-    extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr, val: T);
-    extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
+    extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr) -> T;
+    extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
+    extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
 
     /// If this callback returns true, the JIT will assume MemoryRead* callbacks will always
     /// return the same value at any point in time for this vaddr. The JIT may use this information
     /// in optimizations.
     /// The default implementation will always return false.
-    extern "C" fn is_readonly_memory(cb: CallbackRef<Self>, _addr: VAddr) -> bool {
+    extern "C" fn is_readonly_memory(_cb: &mut CallbackRef<Self>, _addr: VAddr) -> bool {
         false
     }
     /// This function is called when dynarmic doesn't have an implementation for the instruction at `pc` and `num` instructions after.
     /// By default, this function will panic.
-    extern "C" fn interpreter_fallback(cb: CallbackRef<Self>, pc: VAddr, num: usize) {
+    extern "C" fn interpreter_fallback(cb: &mut CallbackRef<Self>, pc: VAddr, num: usize) {
         panic!(
             "dynarmic: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'",
             Self::memory_read::<u32>(cb, pc),
@@ -61,22 +62,23 @@ pub trait Callbacks : Sized {
             pc
         )
     }
-    extern "C" fn raised_exception(cb: CallbackRef<Self>, addr: VAddr, exc: Exception) {
+    extern "C" fn raised_exception(_cb: &mut CallbackRef<Self>, addr: VAddr, exc: Exception) {
         panic!(
             "dynarmic: Unhandled exception '{:?}' at '0x{:X}'",
             exc, addr
         )
     }
-    extern "C" fn call_svc(cb: CallbackRef<Self>, swi: u32);
-    extern "C" fn instruction_synchronization_barrier_raised(cb: CallbackRef<Self>,) {}
+    extern "C" fn call_svc(cb: &mut CallbackRef<Self>, swi: u32);
+    extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackRef<Self>) {}
     /// `ticks` amount of ticks have passed
-    extern "C" fn add_ticks(cb: CallbackRef<Self>, ticks: u64);
+    extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64);
     /// Returns the remaining amount of ticks before the program stops.
-    extern "C" fn get_ticks_remaining(cb: CallbackRef<Self>) -> u64;
+    extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64;
 }
 
 /// A Rust-safe wrapper of Dynarmic's A32 Jit.
 /// This type can be constructed with [Config].
+#[allow(dead_code)]
 pub struct Jit<'a, T: Callbacks> {
     ptr: *mut A32Jit,
     cpp_cb: Box<InternalCallbacks<T>>,
@@ -292,6 +294,29 @@ impl<'a, T: Callbacks> Jit<'a, T> {
             }
         }
     }
+    
+    pub fn callbacks(&mut self) -> &mut CallbackRef<T> {
+        unsafe {
+            std::mem::transmute(self.cpp_cb.as_mut())
+        }
+    }
+}
+
+impl<'a, T: Callbacks> Deref for Jit<'a, T> {
+    type Target = CallbackRef<T>;
+
+    // useless
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            std::mem::transmute(self.cpp_cb.as_ref())
+        }
+    }
+}
+
+impl<'a, T: Callbacks> DerefMut for Jit<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.callbacks()
+    }
 }
 
 pub struct Config<'a, T: Callbacks> {
@@ -333,7 +358,6 @@ impl<'a, T: Callbacks> Config<'a, T> {
         let mut cpp_cb: Box<InternalCallbacks<T>> = Box::new(InternalCallbacks {
             vtable: unsafe { (&Jit::<T>::CALLBACKS as *const A32CallbacksVTable<T> as *const ()).byte_add(VTABLE_DIFF) }, // safety: vtable_diff is ensured by abi-specific code
             ptr: std::ptr::null_mut(),
-            __copy: Default::default(),
         });
 
         self.config.callbacks = cpp_cb.as_mut();

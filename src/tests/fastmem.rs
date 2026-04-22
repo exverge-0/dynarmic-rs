@@ -19,7 +19,7 @@ mod a32 {
     }
 
     impl Callbacks for ArmFastmemTestEnv {
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr) -> T {
+        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -28,7 +28,7 @@ mod a32 {
             }
         }
 
-        extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr, val: T) {
+        extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T) {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -38,20 +38,20 @@ mod a32 {
         }
 
         extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(
-            cb: CallbackRef<Self>,
+            cb: &mut CallbackRef<Self>,
             addr: VAddr,
             val: T,
-            expected: T,
+            _expected: T,
         ) -> bool {
             Self::memory_write(cb, addr, val);
             true
         }
 
-        extern "C" fn call_svc(cb: CallbackRef<Self>, swi: u32) {
+        extern "C" fn call_svc(_cb: &mut CallbackRef<Self>, _swi: u32) {
             unimplemented!()
         }
 
-        extern "C" fn add_ticks(mut cb: CallbackRef<Self>, ticks: u64) {
+        extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64) {
             if ticks > cb.ticks_left {
                 cb.ticks_left = 0;
                 return;
@@ -59,12 +59,12 @@ mod a32 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
     }
 
-    //#[test]
+    #[test]
     fn a32_fastmem() {
         unsafe {
             static address_width: usize = 12;
@@ -95,9 +95,9 @@ mod a32 {
                 57,
             );
 
-            *ptr.add(0).cast::<u32>() = 0xE5904000; // LDR R4, [R0]
-            *ptr.add(4).cast::<u32>() = 0xE5814000; // STR R4, [R1]
-            *ptr.add(8).cast::<u32>() = 0xEAFFFFFE; // B .
+            ArmFastmemTestEnv::memory_write(&mut jit, 0, 0xE5904000u32); // LDR R4, [R0]
+            ArmFastmemTestEnv::memory_write(&mut jit, 4, 0xE5814000u32); // STR R4, [R1]
+            ArmFastmemTestEnv::memory_write(&mut jit, 8, 0xEAFFFFFEu32); // B .
             jit.set_reg(0, 0x100);
             jit.set_reg(1, 0x1F0);
 
@@ -136,7 +136,7 @@ mod a64 {
     }
 
     impl Callbacks for A64FastmemTestEnv {
-        extern "C" fn memory_read<T>(cb: CallbackRef<Self>, vaddr: VAddr) -> T {
+        extern "C" fn memory_read<T>(cb: &mut CallbackRef<Self>, vaddr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(vaddr as usize)
@@ -144,7 +144,7 @@ mod a64 {
                     .read()
             }
         }
-        extern "C" fn memory_write<T>(cb: CallbackRef<Self>, vaddr: VAddr, val: T) {
+        extern "C" fn memory_write<T>(cb: &mut CallbackRef<Self>, vaddr: VAddr, val: T) {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(vaddr as usize)
@@ -153,30 +153,30 @@ mod a64 {
             }
         }
         extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(
-            cb: CallbackRef<Self>,
+            cb: &mut CallbackRef<Self>,
             addr: VAddr,
             val: T,
-            expected: T,
+            _expected: T,
         ) -> bool {
             Self::memory_write(cb, addr, val);
             true
         }
 
-        extern "C" fn call_svc(cb: CallbackRef<Self>, swi: u32) {
+        extern "C" fn call_svc(_cb: &mut CallbackRef<Self>, _swi: u32) {
             unimplemented!()
         }
 
-        extern "C" fn add_ticks(mut cb: CallbackRef<Self>, ticks: u64) {
+        extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64) {
             if ticks > cb.ticks_left {
                 cb.ticks_left = 0;
                 return;
             }
             cb.ticks_left -= ticks;
         }
-        extern "C" fn get_ticks_remaining(cb: CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
-        extern "C" fn get_cntpct(cb: CallbackRef<Self>) -> u64 {
+        extern "C" fn get_cntpct(cb: &mut CallbackRef<Self>) -> u64 {
             0x10000000000 - cb.ticks_left
         }
     }
@@ -213,11 +213,11 @@ mod a64 {
                 57,
             );
 
-            *ptr.add(0).cast::<u32>() = 0xA9401404; // LDP x4, x5, [x0]
-            *ptr.add(4).cast::<u32>() = 0xF9400046; // LDR x6, [x2]
-            *ptr.add(8).cast::<u32>() = 0xA9001424; // STP x4, x5, [x1]
-            *ptr.add(12).cast::<u32>() = 0xF9000066; // STR x6, [x3]
-            *ptr.add(16).cast::<u32>() = 0x14000000; // B .
+            A64FastmemTestEnv::memory_write(&mut jit, 0, 0xA9401404u32); // LDP x4, x5, [x0]
+            A64FastmemTestEnv::memory_write(&mut jit, 4, 0xF9400046u32); // LDR x6, [x2]
+            A64FastmemTestEnv::memory_write(&mut jit, 8, 0xA9001424u32); // STP x4, x5, [x1]
+            A64FastmemTestEnv::memory_write(&mut jit, 12, 0xF9000066u32); // STR x6, [x3]
+            A64FastmemTestEnv::memory_write(&mut jit, 16, 0x14000000u32); // B .
             jit.set_reg(0, 0x100);
             jit.set_reg(1, 0x1F0);
             jit.set_reg(2, 0x10F);

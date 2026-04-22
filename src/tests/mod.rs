@@ -2,9 +2,9 @@ mod fastmem;
 
 mod a32 {
     use crate::a32::{Callbacks, Config, VAddr};
-    use std::collections::BTreeMap;
-    use num_traits::{PrimInt, Unsigned};
     use crate::internal::CallbackRef;
+    use num_traits::{PrimInt, Unsigned};
+    use std::collections::BTreeMap;
 
     // based off dynarmic testenv
     struct ArmTestEnv {
@@ -16,7 +16,7 @@ mod a32 {
     }
 
     impl Callbacks for ArmTestEnv {
-        fn memory_read_code(cb: CallbackRef<Self>, addr: VAddr) -> Option<u32> {
+        fn memory_read_code(cb: &mut CallbackRef<Self>, addr: VAddr) -> Option<u32> {
             if cb.is_in_codemem(addr) {
                 return Some(cb.code_mem[(addr as usize) / 4]);
             }
@@ -24,21 +24,21 @@ mod a32 {
             Some(0xEAFFFFFE)
         }
 
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr) -> T {
+        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr) -> T {
             unimplemented!()
         }
-        extern "C" fn memory_write<T: PrimInt + Unsigned>(mut cb: CallbackRef<Self>, addr: VAddr, val: T) {
+        extern "C" fn memory_write<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
             unimplemented!()
         }
-        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool {
-            unimplemented!()
-        }
-
-        extern "C" fn call_svc(cb: CallbackRef<Self>, swi: u32) {
+        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T, _expected: T) -> bool {
             unimplemented!()
         }
 
-        extern "C" fn add_ticks(mut cb: CallbackRef<Self>, ticks: u64) {
+        extern "C" fn call_svc(_cb: &mut CallbackRef<Self>, _swi: u32) {
+            unimplemented!()
+        }
+
+        extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64) {
             if ticks > cb.ticks_left {
                 cb.ticks_left = 0;
                 return;
@@ -46,7 +46,7 @@ mod a32 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
     }
@@ -91,11 +91,10 @@ mod a32 {
 }
 
 mod a64 {
-    use std::cmp::Ordering;
     use crate::a64::{Callbacks, Config, VAddr};
-    use std::collections::BTreeMap;
-    use num_traits::{PrimInt, Unsigned};
     use crate::internal::CallbackRef;
+    use num_traits::{PrimInt, Unsigned};
+    use std::collections::BTreeMap;
 
     // based off dynarmic testenv
     struct A64TestEnv {
@@ -109,7 +108,7 @@ mod a64 {
     }
 
     impl Callbacks for A64TestEnv {
-        fn memory_read_code(cb: CallbackRef<Self>, addr: VAddr) -> Option<u32> {
+        fn memory_read_code(cb: &mut CallbackRef<Self>, addr: VAddr) -> Option<u32> {
             if !cb.is_in_codemem(addr) {
                 return 0x14000000.into(); // B .
             }
@@ -117,21 +116,21 @@ mod a64 {
             let index = (addr - cb.code_mem_start_addr) as usize / 4;
             (*cb.code_mem.get(index).unwrap()).into()
         }
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr) -> T {
+        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr) -> T {
             unimplemented!()
         }
-        extern "C" fn memory_write<T: PrimInt + Unsigned>(mut cb: CallbackRef<Self>, addr: VAddr, val: T) {
+        extern "C" fn memory_write<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
             unimplemented!()
         }
-        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(cb: CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool {
+        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T, _expected: T) -> bool {
             unimplemented!()
         }
 
-        extern "C" fn call_svc(cb: CallbackRef<Self>, swi: u32) {
+        extern "C" fn call_svc(_cb: &mut CallbackRef<Self>, _swi: u32) {
             todo!()
         }
 
-        extern "C" fn add_ticks(mut cb: CallbackRef<Self>, ticks: u64) {
+        extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64) {
             if ticks > cb.ticks_left {
                 cb.ticks_left = 0;
                 return;
@@ -139,11 +138,11 @@ mod a64 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
 
-        extern "C" fn get_cntpct(cb: CallbackRef<Self>) -> u64 {
+        extern "C" fn get_cntpct(cb: &mut CallbackRef<Self>) -> u64 {
             0x10000000000 - cb.ticks_left
         }
     }
@@ -167,25 +166,23 @@ mod a64 {
 
     #[test]
     fn a64_add() {
-        unsafe {
-            let mut env = A64TestEnv::new();
+        let mut env = A64TestEnv::new();
 
-            env.code_mem.push(0x8b020020); // ADD X0, X1, X2
-            env.code_mem.push(0x14000000); // B .
-            env.ticks_left = 2;
-            
-            let mut jit = Config::new(&mut env).build();
+        env.code_mem.push(0x8b020020); // ADD X0, X1, X2
+        env.code_mem.push(0x14000000); // B .
+        env.ticks_left = 2;
 
-            jit.set_reg(0, 0);
-            jit.set_reg(1, 1);
-            jit.set_reg(2, 2);
-            
-            jit.run();
+        let mut jit = Config::new(&mut env).build();
 
-            assert_eq!(jit.get_reg(0), 3);
-            assert_eq!(jit.get_reg(1), 1);
-            assert_eq!(jit.get_reg(2), 2);
-            assert_eq!(jit.get_pc(), 4);
-        }
+        jit.set_reg(0, 0);
+        jit.set_reg(1, 1);
+        jit.set_reg(2, 2);
+
+        jit.run();
+
+        assert_eq!(jit.get_reg(0), 3);
+        assert_eq!(jit.get_reg(1), 1);
+        assert_eq!(jit.get_reg(2), 2);
+        assert_eq!(jit.get_pc(), 4);
     }
 }

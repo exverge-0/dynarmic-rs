@@ -9,7 +9,6 @@ mod bindings {
 }
 
 pub use bindings::{std as cpp_std, Dynarmic as cpp};
-use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 #[repr(transparent)]
@@ -28,30 +27,29 @@ pub const VTABLE_DIFF: usize = 16;
 pub struct InternalCallbacks<T> {
     pub vtable: *const (),
     pub ptr: *mut T,                  // pointer to Callbacks impl
-    pub __copy: PhantomData<*mut ()>, // prevent InternalCallbacks from being Send/Sync
 }
 
 /// Wrapper struct for a mutable reference to [Callbacks](crate::a64::Callbacks).
 #[repr(transparent)]
-pub struct CallbackRef<T>(*mut InternalCallbacks<T>);
+pub struct CallbackRef<T>(InternalCallbacks<T>);
 
 impl<T> Deref for CallbackRef<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*(*self.0).ptr }
+        unsafe { &*self.0.ptr }
     }
 }
 
 impl<T> DerefMut for CallbackRef<T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *(*self.0).ptr }
+        unsafe { &mut *self.0.ptr }
     }
 }
 
 const _: () = assert!(std::mem::offset_of!(InternalCallbacks<u8>, vtable) == 0);
 const _: () = assert!(std::mem::offset_of!(InternalCallbacks<u8>, ptr) == 8);
-const _: () = assert!(size_of::<CallbackRef<u32>>() == 8);
+const _: () = assert!(size_of::<CallbackRef<u8>>() == size_of::<InternalCallbacks<u8>>());
 
 pub extern "C" fn usercallbacks_destructor() {
     panic!(
@@ -74,61 +72,40 @@ pub struct A32CallbacksVTable<T> {
 
     // https://github.com/rust-lang/rust/issues/38258
     #[cfg(not(target_env = "msvc"))]
-    pub memory_read_code: unsafe extern "C" fn(CallbackRef<T>, A32VAddr) -> crate::CppOptional<u32>,
-
+    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, A32VAddr) -> crate::CppOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(CallbackRef<T>, *mut crate::CppOptional<u32>, A32VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, *mut crate::CppOptional<u32>, A32VAddr),
 
-    pub pre_code_read_hook: extern "C" fn(CallbackRef<T>, bool, A32VAddr, &cpp::A32::IREmitter) -> bool,
-
-    pub pre_code_translation_hook: extern "C" fn(CallbackRef<T>, bool, A32VAddr, &cpp::A32::IREmitter),
-
-    pub get_ticks_for_code: extern "C" fn(CallbackRef<T>, bool, A32VAddr, u32) -> u64,
+    pub pre_code_read_hook: extern "C" fn(&mut CallbackRef<T>, bool, A32VAddr, &cpp::A32::IREmitter) -> bool,
+    pub pre_code_translation_hook: extern "C" fn(&mut CallbackRef<T>, bool, A32VAddr, &cpp::A32::IREmitter),
+    pub get_ticks_for_code: extern "C" fn(&mut CallbackRef<T>, bool, A32VAddr, u32) -> u64,
 
     // these functions should never be called; UserCallbacks should always be owned by Rust
     pub cpp_destructor: extern "C" fn(),
-
     #[cfg(not(target_env = "msvc"))]
     pub itanium_destructor: extern "C" fn(),
 
     // UserCallbacks
-    pub memory_read_8: extern "C" fn(CallbackRef<T>, A32VAddr) -> u8,
+    pub memory_read_8: extern "C" fn(&mut CallbackRef<T>, A32VAddr) -> u8,
+    pub memory_read_16: extern "C" fn(&mut CallbackRef<T>, A32VAddr) -> u16,
+    pub memory_read_32: extern "C" fn(&mut CallbackRef<T>, A32VAddr) -> u32,
+    pub memory_read_64: extern "C" fn(&mut CallbackRef<T>, A32VAddr) -> u64,
+    pub memory_write_8: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u8),
+    pub memory_write_16: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u16),
+    pub memory_write_32: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u32),
+    pub memory_write_64: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u64),
+    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u8, u8) -> bool,
+    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u16, u16) -> bool,
+    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u32, u32) -> bool,
+    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackRef<T>, A32VAddr, u64, u64) -> bool,
 
-    pub memory_read_16: extern "C" fn(CallbackRef<T>, A32VAddr) -> u16,
-
-    pub memory_read_32: extern "C" fn(CallbackRef<T>, A32VAddr) -> u32,
-
-    pub memory_read_64: extern "C" fn(CallbackRef<T>, A32VAddr) -> u64,
-
-    pub memory_write_8: extern "C" fn(CallbackRef<T>, A32VAddr, u8),
-
-    pub memory_write_16: extern "C" fn(CallbackRef<T>, A32VAddr, u16),
-
-    pub memory_write_32: extern "C" fn(CallbackRef<T>, A32VAddr, u32),
-
-    pub memory_write_64: extern "C" fn(CallbackRef<T>, A32VAddr, u64),
-
-    pub memory_write_exclusive_8: extern "C" fn(CallbackRef<T>, A32VAddr, u8, u8) -> bool,
-
-    pub memory_write_exclusive_16: extern "C" fn(CallbackRef<T>, A32VAddr, u16, u16) -> bool,
-
-    pub memory_write_exclusive_32: extern "C" fn(CallbackRef<T>, A32VAddr, u32, u32) -> bool,
-
-    pub memory_write_exclusive_64: extern "C" fn(CallbackRef<T>, A32VAddr, u64, u64) -> bool,
-
-    pub is_readonly_memory: extern "C" fn(CallbackRef<T>, A32VAddr) -> bool,
-
-    pub interpreter_fallback: extern "C" fn(CallbackRef<T>, A32VAddr, usize),
-
-    pub call_svc: extern "C" fn(CallbackRef<T>, u32),
-
-    pub exception_raised: extern "C" fn(CallbackRef<T>, A32VAddr, cpp::A32::Exception),
-
-    pub instruction_synchronization_barrier_raised: extern "C" fn(CallbackRef<T>),
-
-    pub add_ticks: extern "C" fn(CallbackRef<T>, u64),
-
-    pub get_ticks_remaining: extern "C" fn(CallbackRef<T>) -> u64,
+    pub is_readonly_memory: extern "C" fn(&mut CallbackRef<T>, A32VAddr) -> bool,
+    pub interpreter_fallback: extern "C" fn(&mut CallbackRef<T>, A32VAddr, usize),
+    pub call_svc: extern "C" fn(&mut CallbackRef<T>, u32),
+    pub exception_raised: extern "C" fn(&mut CallbackRef<T>, A32VAddr, cpp::A32::Exception),
+    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackRef<T>),
+    pub add_ticks: extern "C" fn(&mut CallbackRef<T>, u64),
+    pub get_ticks_remaining: extern "C" fn(&mut CallbackRef<T>) -> u64,
 }
 
 #[repr(C)]
@@ -198,35 +175,36 @@ pub struct A64CallbacksVTable<T> {
 
     // https://github.com/rust-lang/rust/issues/38258
     #[cfg(not(target_env = "msvc"))]
-    pub memory_read_code: unsafe extern "C" fn(CallbackRef<T>, A64VAddr) -> crate::CppOptional<u32>,
+    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> crate::CppOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(CallbackRef<T>, *mut crate::CppOptional<u32>, A64VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, *mut crate::CppOptional<u32>, A64VAddr),
 
-    pub memory_read_8: extern "C" fn(CallbackRef<T>, A64VAddr) -> u8,
-    pub memory_read_16: extern "C" fn(CallbackRef<T>, A64VAddr) -> u16,
-    pub memory_read_32: extern "C" fn(CallbackRef<T>, A64VAddr) -> u32,
-    pub memory_read_64: extern "C" fn(CallbackRef<T>, A64VAddr) -> u64,
-    pub memory_read_128: extern "C" fn(CallbackRef<T>, A64VAddr) -> u128,
-    pub memory_write_8: extern "C" fn(CallbackRef<T>, A64VAddr, u8),
-    pub memory_write_16: extern "C" fn(CallbackRef<T>, A64VAddr, u16),
-    pub memory_write_32: extern "C" fn(CallbackRef<T>, A64VAddr, u32),
-    pub memory_write_64: extern "C" fn(CallbackRef<T>, A64VAddr, u64),
-    pub memory_write_128: extern "C" fn(CallbackRef<T>, A64VAddr, u128),
-    pub memory_write_exclusive_8: extern "C" fn(CallbackRef<T>, A64VAddr, u8, u8) -> bool,
-    pub memory_write_exclusive_16: extern "C" fn(CallbackRef<T>, A64VAddr, u16, u16) -> bool,
-    pub memory_write_exclusive_32: extern "C" fn(CallbackRef<T>, A64VAddr, u32, u32) -> bool,
-    pub memory_write_exclusive_64: extern "C" fn(CallbackRef<T>, A64VAddr, u64, u64) -> bool,
-    pub memory_write_exclusive_128: extern "C" fn(CallbackRef<T>, A64VAddr, u128, u128) -> bool,
-    pub is_readonly_memory: extern "C" fn(CallbackRef<T>, A64VAddr) -> bool,
-    pub interpreter_fallback: extern "C" fn(CallbackRef<T>, A64VAddr, usize),
-    pub call_svc: extern "C" fn(CallbackRef<T>, u32),
-    pub exception_raised: extern "C" fn(CallbackRef<T>, A64VAddr, cpp::A64::Exception),
-    pub data_cache_operation_raised: extern "C" fn(CallbackRef<T>, DataCacheOperation, VAddr),
-    pub instruction_cache_operation_raised: extern "C" fn(CallbackRef<T>, InstructionCacheOperation, VAddr),
-    pub instruction_synchronization_barrier_raised: extern "C" fn(CallbackRef<T>),
-    pub add_ticks: extern "C" fn(CallbackRef<T>, u64),
-    pub get_ticks_remaining: extern "C" fn(CallbackRef<T>) -> u64,
-    pub get_cntpct: extern "C" fn(CallbackRef<T>) -> u64,
+    pub memory_read_8: extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> u8,
+    pub memory_read_16: extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> u16,
+    pub memory_read_32: extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> u32,
+    pub memory_read_64: extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> u64,
+    pub memory_read_128: extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> u128,
+    pub memory_write_8: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u8),
+    pub memory_write_16: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u16),
+    pub memory_write_32: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u32),
+    pub memory_write_64: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u64),
+    pub memory_write_128: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u128),
+    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u8, u8) -> bool,
+    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u16, u16) -> bool,
+    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u32, u32) -> bool,
+    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u64, u64) -> bool,
+    pub memory_write_exclusive_128: extern "C" fn(&mut CallbackRef<T>, A64VAddr, u128, u128) -> bool,
+
+    pub is_readonly_memory: extern "C" fn(&mut CallbackRef<T>, A64VAddr) -> bool,
+    pub interpreter_fallback: extern "C" fn(&mut CallbackRef<T>, A64VAddr, usize),
+    pub call_svc: extern "C" fn(&mut CallbackRef<T>, u32),
+    pub exception_raised: extern "C" fn(&mut CallbackRef<T>, A64VAddr, cpp::A64::Exception),
+    pub data_cache_operation_raised: extern "C" fn(&mut CallbackRef<T>, DataCacheOperation, VAddr),
+    pub instruction_cache_operation_raised: extern "C" fn(&mut CallbackRef<T>, InstructionCacheOperation, VAddr),
+    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackRef<T>),
+    pub add_ticks: extern "C" fn(&mut CallbackRef<T>, u64),
+    pub get_ticks_remaining: extern "C" fn(&mut CallbackRef<T>) -> u64,
+    pub get_cntpct: extern "C" fn(&mut CallbackRef<T>) -> u64,
 }
 
 #[repr(C)]

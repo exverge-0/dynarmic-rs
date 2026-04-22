@@ -15,6 +15,7 @@ pub(crate) use internal::cpp_std::{allocator as cpp_allocator, string as cpp_str
 /// - This type **cannot** be used to hold any type other than [u128], [u64], and C++ `std::string`.
 /// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate.
 // todo: implement conversions for cxx::CxxVector?
+#[allow(private_bounds)]
 #[repr(C)]
 pub struct CppVector<T: CppVectorElement, Allocator: CppVectorAllocator> {
     __alloc: PhantomData<Allocator>,
@@ -22,26 +23,27 @@ pub struct CppVector<T: CppVectorElement, Allocator: CppVectorAllocator> {
 }
 
 unsafe trait CppVectorElement: Sized {
-    unsafe fn __dynarmic_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>);
+    /// Reserved for use by [dynarmic] crate. Do not use.
+    unsafe fn __cpp_vector_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>);
 }
 unsafe trait CppVectorAllocator {}
 
 unsafe impl CppVectorElement for internal::cpp_std::string {
-    unsafe fn __dynarmic_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>) {
+    unsafe fn __cpp_vector_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>) {
         unsafe {
             internal::cpp::destroy_vec_cppstring(std::mem::transmute(vec));
         }
     }
 }
 unsafe impl CppVectorElement for u64 {
-    unsafe fn __dynarmic_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>) {
+    unsafe fn __cpp_vector_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>) {
         unsafe {
             internal::cpp::destroy_vec_u64(vec);
         }
     }
 }
 unsafe impl CppVectorElement for u128 {
-    unsafe fn __dynarmic_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>) {
+    unsafe fn __cpp_vector_drop(vec: &mut CppVector<Self, internal::cpp_std::allocator>) {
         unsafe {
             internal::cpp::destroy_vec_u128(vec);
         }
@@ -52,7 +54,7 @@ unsafe impl CppVectorAllocator for internal::cpp_std::allocator {}
 impl<T: CppVectorElement, Allocator: CppVectorAllocator> Drop for CppVector<T, Allocator> {
     fn drop(&mut self) {
         unsafe {
-            T::__dynarmic_drop(std::mem::transmute(self));
+            T::__cpp_vector_drop(std::mem::transmute(self));
         }
     }
 }
