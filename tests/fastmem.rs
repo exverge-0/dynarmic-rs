@@ -1,8 +1,8 @@
 mod a32 {
-    use crate::a32::{Callbacks, Config, VAddr};
+    use dynarmic::a32::{Callbacks, Config, VAddr};
     use num_traits::{PrimInt, Unsigned};
     use std::cmp::Ordering;
-    use crate::internal::CallbackRef;
+    use dynarmic::CallbackRef;
 
     struct ArmFastmemTestEnv {
         ticks_left: u64,
@@ -19,7 +19,7 @@ mod a32 {
     }
 
     impl Callbacks for ArmFastmemTestEnv {
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr) -> T {
+        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &CallbackRef<Self>, addr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -59,7 +59,7 @@ mod a32 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
     }
@@ -78,14 +78,14 @@ mod a32 {
 
             let mut env = ArmFastmemTestEnv::new(ptr);
             env.ticks_left = 3;
-            let mut jit_config = Config::new(&mut env);
-            let config = &mut jit_config.config; // TODO: make private
 
-            config.fastmem_pointer = (ptr as usize).into();
-            config.recompile_on_fastmem_failure = false;
-            config.processor_id = 0;
+            let mut config = Config::new(env);
 
-            let mut jit = jit_config.build();
+            config.fastmem(ptr.cast(), false)
+                .processor_id(0);
+
+            let mut jit = config.build();
+
             std::ptr::copy_nonoverlapping(
                 std::ffi::CString::new("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")
                     .unwrap()
@@ -115,10 +115,10 @@ mod a32 {
     }
 }
 mod a64 {
-    use crate::a64::{Callbacks, Config, VAddr};
+    use dynarmic::a64::{Callbacks, Config, VAddr};
     use num_traits::{PrimInt, Unsigned};
     use std::cmp::Ordering;
-    use crate::internal::CallbackRef;
+    use dynarmic::CallbackRef;
 
     #[repr(C)]
     struct A64FastmemTestEnv {
@@ -136,7 +136,7 @@ mod a64 {
     }
 
     impl Callbacks for A64FastmemTestEnv {
-        extern "C" fn memory_read<T>(cb: &mut CallbackRef<Self>, vaddr: VAddr) -> T {
+        extern "C" fn memory_read<T>(cb: &CallbackRef<Self>, vaddr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(vaddr as usize)
@@ -173,10 +173,10 @@ mod a64 {
             }
             cb.ticks_left -= ticks;
         }
-        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
-        extern "C" fn get_cntpct(cb: &mut CallbackRef<Self>) -> u64 {
+        extern "C" fn get_cntpct(cb: &CallbackRef<Self>) -> u64 {
             0x10000000000 - cb.ticks_left
         }
     }
@@ -195,15 +195,11 @@ mod a64 {
 
             let mut env = A64FastmemTestEnv::new(ptr);
             env.ticks_left = 5;
-            let mut jit_config = Config::new(&mut env);
-            let config = &mut jit_config.config; // TODO: make private
-            config.fastmem_pointer = (ptr as usize).into();
-            config.fastmem_address_space_bits = address_width;
-            config.recompile_on_fastmem_failure = false;
-            config.silently_mirror_fastmem = true;
-            config.processor_id = 0;
+            let mut config = Config::new(env);
+            config.fastmem(ptr as *mut _, address_width, false, true)
+                .processor_id(0);
 
-            let mut jit = jit_config.build();
+            let mut jit = config.build();
             std::ptr::copy_nonoverlapping(
                 std::ffi::CString::new("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")
                     .unwrap()

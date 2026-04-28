@@ -1,8 +1,8 @@
 mod fastmem;
 
 mod a32 {
-    use crate::a32::{Callbacks, Config, VAddr};
-    use crate::internal::CallbackRef;
+    use dynarmic::a32::{Callbacks, Config, VAddr};
+    use dynarmic::CallbackRef;
     use num_traits::{PrimInt, Unsigned};
     use std::collections::BTreeMap;
 
@@ -16,7 +16,7 @@ mod a32 {
     }
 
     impl Callbacks for ArmTestEnv {
-        fn memory_read_code(cb: &mut CallbackRef<Self>, addr: VAddr) -> Option<u32> {
+        fn memory_read_code(cb: &CallbackRef<Self>, addr: VAddr) -> Option<u32> {
             if cb.is_in_codemem(addr) {
                 return Some(cb.code_mem[(addr as usize) / 4]);
             }
@@ -24,7 +24,7 @@ mod a32 {
             Some(0xEAFFFFFE)
         }
 
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr) -> T {
+        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &CallbackRef<Self>, _addr: VAddr) -> T {
             unimplemented!()
         }
         extern "C" fn memory_write<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
@@ -46,7 +46,7 @@ mod a32 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
     }
@@ -74,7 +74,7 @@ mod a32 {
             env.code_mem.push(0xeafffffe); // B .
             env.ticks_left = 2;
             
-            let mut jit = Config::new(&mut env).build();
+            let mut jit = Config::new(env).build();
 
             jit.set_reg(0, 0);
             jit.set_reg(1, 1);
@@ -91,8 +91,8 @@ mod a32 {
 }
 
 mod a64 {
-    use crate::a64::{Callbacks, Config, VAddr};
-    use crate::internal::CallbackRef;
+    use dynarmic::a64::{Callbacks, Config, VAddr};
+    use dynarmic::CallbackRef;
     use num_traits::{PrimInt, Unsigned};
     use std::collections::BTreeMap;
 
@@ -108,7 +108,7 @@ mod a64 {
     }
 
     impl Callbacks for A64TestEnv {
-        fn memory_read_code(cb: &mut CallbackRef<Self>, addr: VAddr) -> Option<u32> {
+        fn memory_read_code(cb: &CallbackRef<Self>, addr: VAddr) -> Option<u32> {
             if !cb.is_in_codemem(addr) {
                 return 0x14000000.into(); // B .
             }
@@ -116,7 +116,7 @@ mod a64 {
             let index = (addr - cb.code_mem_start_addr) as usize / 4;
             (*cb.code_mem.get(index).unwrap()).into()
         }
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr) -> T {
+        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &CallbackRef<Self>, _addr: VAddr) -> T {
             unimplemented!()
         }
         extern "C" fn memory_write<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
@@ -138,11 +138,11 @@ mod a64 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: &mut CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64 {
             cb.ticks_left
         }
 
-        extern "C" fn get_cntpct(cb: &mut CallbackRef<Self>) -> u64 {
+        extern "C" fn get_cntpct(cb: &CallbackRef<Self>) -> u64 {
             0x10000000000 - cb.ticks_left
         }
     }
@@ -172,7 +172,7 @@ mod a64 {
         env.code_mem.push(0x14000000); // B .
         env.ticks_left = 2;
 
-        let mut jit = Config::new(&mut env).build();
+        let mut jit = Config::new(env).build();
 
         jit.set_reg(0, 0);
         jit.set_reg(1, 1);

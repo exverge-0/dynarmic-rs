@@ -26,11 +26,12 @@ fn main() {
         )
         .generator("Ninja");
 
-    cmake.define("CMAKE_BUILD_TYPE", "RelWithDebInfo");
-
-    if var("CARGO_FEATURE_DEVIRTUALIZE").is_ok() {
-        cmake.define("DYNARMIC_RS_CUSTOM_EMIT_BEHAVIOR", "ON");
+    if var("DEBUG").unwrap_or("".into()).eq("true") {
+        cmake.define("CMAKE_BUILD_TYPE", "RelWithDebInfo");
+    } else {
+        cmake.define("CMAKE_BUILD_TYPE", "Release");
     }
+
     let dst = cmake.build();
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
@@ -42,58 +43,21 @@ fn main() {
         println!("cargo:rustc-link-lib=Zydis");
     }
 
-    // todo: what do we really generate here? we can manually bind everything else and drop the libclang dep
-    let bindgen = bindgen::Builder::default()
-        .header("src/wrapper.hpp")
-        .enable_cxx_namespaces()
-        .vtable_generation(true)
-        .opaque_type("std::_.*")
-        .opaque_type("std::.*string.*")
-        .opaque_type("std::unique_ptr.*")
-        .blocklist_item("std::shared_.*")
-        .blocklist_item("std::vector.*")
-        .blocklist_item("std::optional.*")
-        .blocklist_type("Dynarmic::.*Vector")
-        .blocklist_type("Dynarmic::.*::UserConfig")
-        .blocklist_type("Dynarmic::.*::UserCallbacks.*")
-        .blocklist_type("Dynarmic::OptimizationFlag")
-        .module_raw_line(
-            "root::std",
-            "pub use crate::CppVector as vector;",
-        )
-        .module_raw_line(
-            "root::std",
-            "pub use crate::CppOptional as optional;",
-        )
-        .module_raw_line(
-            "root::std",
-            "pub use crate::CppSharedPtr as shared_ptr;",
-        )
-        .module_raw_line("root::Dynarmic::A64", "pub type UserConfig = crate::internal::A64Config<u8>;")
-        .module_raw_line("root::Dynarmic::A32", "pub type UserConfig = crate::internal::A32Config<u8>;")
-        .module_raw_line("root::Dynarmic::A64", "pub type Vector = u128;")
-        .module_raw_line("root::Dynarmic", "pub type Vector = u128;")
-        .module_raw_line(
-            "root::Dynarmic",
-            "pub type OptimizationFlag = crate::OptimizationFlag;",
-        )
-        .rustified_enum("Dynarmic::HaltReason")
-        .rustified_enum("Dynarmic::A32::CoprocReg")
-        .rustified_enum("Dynarmic::.*::Exception")
-        .rustified_enum("Dynarmic::.*::ArchVersion")
-        .rustified_enum("Dynarmic::.*::DataCacheOperation")
-        .rustified_enum("Dynarmic::.*::InstructionCacheOperation")
-        .allowlist_type("Dynarmic::.*")
-        .allowlist_function("Dynarmic::.*")
-        .allowlist_var("Dynarmic::.*")
-        .clang_arg("-std=c++20")
-        .clang_arg(format!("-I{}/include", dst.display()))
-        .generate()
-        .expect("Unable to generate bindings");
+    if var("PROFILE").unwrap_or("".into()) == "test" {
+        // todo:
+        let bindgen = bindgen::Builder::default()
+            .header("src/wrapper.hpp")
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+            .allowlist_type("CompilerConstants")
+            .clang_arg("-std=c++20")
+            .clang_arg(format!("-I{}/include", dst.display()))
+            .generate()
+            .expect("Unable to generate bindings");
 
-    bindgen
-        .write_to_file(PathBuf::from(var("OUT_DIR").unwrap()).join("bindings.rs"))
-        .expect("Couldn't write bindings!");
+        bindgen
+            .write_to_file(PathBuf::from(var("OUT_DIR").unwrap()).join("bindings.rs"))
+            .expect("Couldn't write bindings");
+    }
 
     // Compile constants and FFI helper functions
     cc::Build::new()
