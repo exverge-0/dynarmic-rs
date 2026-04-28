@@ -43,22 +43,6 @@ fn main() {
         println!("cargo:rustc-link-lib=Zydis");
     }
 
-    if var("PROFILE").unwrap_or("".into()) == "test" {
-        // todo:
-        let bindgen = bindgen::Builder::default()
-            .header("src/wrapper.hpp")
-            .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-            .allowlist_type("CompilerConstants")
-            .clang_arg("-std=c++20")
-            .clang_arg(format!("-I{}/include", dst.display()))
-            .generate()
-            .expect("Unable to generate bindings");
-
-        bindgen
-            .write_to_file(PathBuf::from(var("OUT_DIR").unwrap()).join("bindings.rs"))
-            .expect("Couldn't write bindings");
-    }
-
     // Compile constants and FFI helper functions
     cc::Build::new()
         .cpp(true)
