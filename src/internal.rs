@@ -173,7 +173,7 @@ pub struct A64CallbacksVTable<T> {
     #[cfg(not(target_env = "msvc"))]
     pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, a64::VAddr) -> cxx::CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, *mut cxx::CxxOptional<u32>, a64::VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut cxx::CxxOptional<u32>, a64::VAddr),
 
     pub memory_read_8: extern "C" fn(&CallbackRef<T>, a64::VAddr) -> u8,
     pub memory_read_16: extern "C" fn(&CallbackRef<T>, a64::VAddr) -> u16,
