@@ -92,7 +92,7 @@ pub trait Callbacks : Sized {
     #[cfg(target_env = "msvc")]
     unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<Self>, out: *mut CxxOptional<u32>, addr: VAddr) {
         unsafe {
-            *out = self.memory_read_code(addr).unwrap_or(0).into();
+            *out = Self::memory_read_code(cb, addr).unwrap_or(0).into();
         }
     }
 

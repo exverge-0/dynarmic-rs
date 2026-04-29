@@ -33,7 +33,7 @@ pub struct A32CallbacksVTable<T> {
     #[cfg(not(target_env = "msvc"))]
     pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, a32::VAddr) -> cxx::CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut CppOptional<u32>, a32::VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut cxx::CxxOptional<u32>, a32::VAddr),
 
     pub pre_code_read_hook: extern "C" fn(&mut CallbackRef<T>, bool, a32::VAddr, &a32::IREmitter) -> bool,
     pub pre_code_translation_hook: extern "C" fn(&mut CallbackRef<T>, bool, a32::VAddr, &a32::IREmitter),
@@ -173,7 +173,7 @@ pub struct A64CallbacksVTable<T> {
     #[cfg(not(target_env = "msvc"))]
     pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, a64::VAddr) -> cxx::CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, *mut CppOptional<u32>, a64::VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&mut CallbackRef<T>, *mut cxx::CxxOptional<u32>, a64::VAddr),
 
     pub memory_read_8: extern "C" fn(&CallbackRef<T>, a64::VAddr) -> u8,
     pub memory_read_16: extern "C" fn(&CallbackRef<T>, a64::VAddr) -> u16,
@@ -207,14 +207,14 @@ pub struct A64CallbacksVTable<T> {
 pub struct A64Config<T> {
     pub callbacks: *mut CallbackRef<T>,
     pub processor_id: usize,
-    pub global_monitor: *mut super::ExclusiveMonitor,
+    pub global_monitor: *mut ExclusiveMonitor,
     /// This selects other optimizations than can't otherwise be disabled by setting other
     /// configuration options. This includes:
     /// - IR optimizations
     /// - Block linking optimizations
     /// - RSB optimizations
     /// This is intended to be used for debugging.
-    pub optimizations: super::OptimizationFlag,
+    pub optimizations: OptimizationFlag,
     /// This enables unsafe optimizations that reduce emulation accuracy in favour of speed.
     /// For safety, in order to enable unsafe optimizations you have to set BOTH this flag
     /// AND the appropriate flag bits above.
