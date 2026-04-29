@@ -1,3 +1,4 @@
+use std::mem::MaybeUninit;
 use crate::internal::{A64CallbacksVTable, A64Config, VTABLE_DIFF};
 use crate::CallbackRef;
 use num_traits::{PrimInt, Unsigned};
@@ -457,7 +458,11 @@ impl<T: Callbacks> Jit<T> {
         unsafe extern "C" {
             pub fn JitA64_Disassemble(this: *const InternalJit, out: *mut crate::cxx::CxxVector<crate::cxx::CxxString>);
         }
-        todo!()
+        let mut out = MaybeUninit::<crate::cxx::CxxVector<crate::cxx::CxxString>>::uninit();
+        unsafe { 
+            JitA64_Disassemble(self.ptr, out.as_mut_ptr()); 
+            out.assume_init()
+        }
     }
 }
 

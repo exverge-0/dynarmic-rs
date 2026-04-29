@@ -361,7 +361,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_cpsr(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA32_Cpsr(this: *const InternalJit) -> ::std::os::raw::c_uint;
+            pub fn JitA32_Cpsr(this: *const InternalJit) -> u32;
         }
         unsafe { JitA32_Cpsr(self.ptr) }
     }
@@ -370,7 +370,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_cpsr(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA32_SetCpsr(this: *mut InternalJit, value: ::std::os::raw::c_uint);
+            pub fn JitA32_SetCpsr(this: *mut InternalJit, value: u32);
         }
         unsafe { JitA32_SetCpsr(self.ptr, val) }
     }
@@ -379,7 +379,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_fpscr(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA32_Fpscr(this: *const InternalJit) -> ::std::os::raw::c_uint;
+            pub fn JitA32_Fpscr(this: *const InternalJit) -> u32;
         }
         unsafe { JitA32_Fpscr(self.ptr) }
     }
@@ -388,7 +388,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_fpscr(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA32_SetFpscr(this: *mut InternalJit, value: ::std::os::raw::c_uint, );
+            pub fn JitA32_SetFpscr(this: *mut InternalJit, value: u32, );
         }
         unsafe { JitA32_SetFpscr(self.ptr, val) }
     }
@@ -425,7 +425,11 @@ impl<T: Callbacks> Jit<T> {
         unsafe extern "C" {
             pub fn JitA32_Disassemble(this: *const InternalJit, out: *mut crate::cxx::CxxVector<crate::cxx::CxxString>);
         }
-        todo!()
+        let mut out = std::mem::MaybeUninit::<crate::cxx::CxxVector<crate::cxx::CxxString>>::uninit();
+        unsafe {
+            JitA32_Disassemble(self.ptr, out.as_mut_ptr());
+            out.assume_init()
+        }
     }
 }
 
