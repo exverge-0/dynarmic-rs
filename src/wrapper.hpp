@@ -55,12 +55,6 @@ void JitA32_SetFpscr(Dynarmic::A32::Jit* jit, std::uint32_t val) {
 void JitA32_ClearExclusiveState(Dynarmic::A32::Jit* jit) {
     jit->ClearExclusiveState();
 }
-void JitA32_DumpDisassembly(Dynarmic::A32::Jit* jit) {
-    jit->DumpDisassembly();
-}
-void JitA32_Disassemble(Dynarmic::A32::Jit* jit, std::vector<std::string>* out) {
-    *out = jit->Disassemble();
-}
 
 
 Dynarmic::HaltReason JitA64_Run(Dynarmic::A64::Jit* jit) {
@@ -144,12 +138,6 @@ void JitA64_ClearExclusiveState(Dynarmic::A64::Jit* jit) {
 }
 bool JitA64_IsExecuting(Dynarmic::A64::Jit* jit) {
     return jit->IsExecuting();
-}
-void JitA64_DumpDisassembly(Dynarmic::A64::Jit* jit) {
-    jit->DumpDisassembly();
-}
-void JitA64_Disassemble(Dynarmic::A64::Jit* jit, std::vector<std::string>* out) {
-    *out = jit->Disassemble();
 }
 
 void ExclusiveMonitor_ExclusiveMonitor(Dynarmic::ExclusiveMonitor* self, size_t processor_count) {

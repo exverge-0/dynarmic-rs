@@ -408,29 +408,6 @@ impl<T: Callbacks> Jit<T> {
     pub fn is_executing(&self) -> bool {
         unsafe { (*self.ptr).is_executing }
     }
-
-    /// Dumps the disassembly of all compiled code to stdout.
-    #[inline]
-    pub fn dump_disassembly(&self) {
-        unsafe extern "C" {
-            pub fn JitA32_DumpDisassembly(this: *const InternalJit);
-        }
-        unsafe { JitA32_DumpDisassembly(self.ptr) }
-    }
-
-    /// Disassemble the instructions following the current pc and return
-    /// the resulting instructions as a vector of their string representations.
-    #[inline]
-    pub fn disassemble(&self) -> crate::cxx::CxxVector<crate::cxx::CxxString> {
-        unsafe extern "C" {
-            pub fn JitA32_Disassemble(this: *const InternalJit, out: *mut crate::cxx::CxxVector<crate::cxx::CxxString>);
-        }
-        let mut out = std::mem::MaybeUninit::<crate::cxx::CxxVector<crate::cxx::CxxString>>::uninit();
-        unsafe {
-            JitA32_Disassemble(self.ptr, out.as_mut_ptr());
-            out.assume_init()
-        }
-    }
 }
 
 impl<T: Callbacks> Deref for Jit<T> {
