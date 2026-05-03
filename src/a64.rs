@@ -1,7 +1,5 @@
-use std::mem::MaybeUninit;
 use crate::internal::{A64CallbacksVTable, A64Config, VTABLE_DIFF};
-use crate::CallbackRef;
-use num_traits::{PrimInt, Unsigned};
+use crate::{CallbackRef, GuestInt};
 use std::ops::{Deref, DerefMut};
 
 pub type VAddr = u64;
@@ -77,20 +75,9 @@ pub trait Callbacks : Sized {
         Some(Self::memory_read(cb, addr))
     }
 
-    #[cfg(not(target_env = "msvc"))]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<Self>, addr: VAddr) -> crate::cxx::CxxOptional<u32> {
-        Self::memory_read_code(cb, addr).unwrap_or(0).into()
-    }
-    #[cfg(target_env = "msvc")]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<Self>, out: *mut crate::cxx::CxxOptional<u32>, addr: VAddr) {
-        unsafe {
-            *out = Self::memory_read_code(cb, addr).unwrap_or(0).into();
-        }
-    }
-
-    extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &CallbackRef<Self>, addr: VAddr) -> T;
-    extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
-    extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
+    extern "C" fn memory_read<T: GuestInt>(cb: &CallbackRef<Self>, addr: VAddr) -> T;
+    extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
+    extern "C" fn memory_write_exclusive<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
     /// If this callback returns true, the Jit will assume MemoryRead* callbacks will always
     /// return the same value at any point in time for this vaddr. The Jit may use this information
     /// in optimizations.
@@ -109,10 +96,7 @@ pub trait Callbacks : Sized {
         )
     }
     extern "C" fn raised_exception(_cb: &mut CallbackRef<Self>, addr: VAddr, exc: Exception) {
-        panic!(
-            "dynarmic: Unhandled exception '{:?}' at '0x{:X}'",
-            exc, addr
-        )
+        panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'", )
     }
     extern "C" fn call_svc(cb: &mut CallbackRef<Self>, swi: u32);
     extern "C" fn data_cache_operation_raised(_cb: &mut CallbackRef<Self>, _op: DataCacheOperation, _addr: VAddr) {}
@@ -126,32 +110,43 @@ pub trait Callbacks : Sized {
     extern "C" fn get_cntpct(cb: &CallbackRef<Self>) -> u64;
 }
 
-pub type InternalJit = u64;
+pub type Jit = u64;
 
 /// A Rust-safe wrapper of Dynarmic's A64 Jit.
 /// This type can be constructed with [Config].
 #[allow(dead_code)]
-pub struct Jit<T: Callbacks> {
-    ptr: *mut InternalJit,
+pub struct Dynarmic<T: Callbacks> {
+    ptr: *mut Jit,
     cpp_cb: Box<CallbackRef<T>>,
     rust_cb: Box<T>,
 }
 
-impl<T: Callbacks> Drop for Jit<T> {
+impl<T: Callbacks> Drop for Dynarmic<T> {
     fn drop(&mut self) {
         unsafe {
-            crate::cxx::bindings::delete_a64_jit(self.ptr)
+            crate::cxx::delete_a64_jit(self.ptr)
         }
     }
 }
 
-impl<T: Callbacks> Jit<T> {
+impl<T: Callbacks> Dynarmic<T> {
+    #[cfg(not(target_env = "msvc"))]
+    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> crate::cxx::CxxOptional<u32> {
+        T::memory_read_code(cb, addr).unwrap_or(0).into()
+    }
+    #[cfg(target_env = "msvc")]
+    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, out: *mut crate::cxx::CxxOptional<u32>, addr: VAddr) {
+        unsafe {
+            *out = T::memory_read_code(cb, addr).unwrap_or(0).into();
+        }
+    }
+
     const CALLBACKS: A64CallbacksVTable<T> = A64CallbacksVTable {
         #[cfg(not(target_env = "msvc"))]
         offset_to_top: 0,
         #[cfg(not(target_env = "msvc"))]
         typeinfo: unsafe { std::mem::zeroed() },
-        memory_read_code: T::memory_read_code_impl,
+        memory_read_code: Self::memory_read_code_impl,
         cpp_destructor: crate::internal::usercallbacks_destructor,
         #[cfg(not(target_env = "msvc"))]
         itanium_destructor: crate::internal::usercallbacks_destructor,
@@ -182,12 +177,17 @@ impl<T: Callbacks> Jit<T> {
         get_cntpct: T::get_cntpct,
     };
 
+    #[inline]
+    pub fn new(cb: T) -> Config<T> {
+        Config::new(cb)
+    }
+
     /// Runs the emulated CPU.
     /// Cannot be recursively called.
     #[inline]
     pub fn run(&mut self) -> crate::HaltReason {
         unsafe extern "C" {
-            pub fn JitA64_Run(this: *mut InternalJit) -> crate::HaltReason;
+            pub fn JitA64_Run(this: *mut Jit) -> crate::HaltReason;
         }
         unsafe { JitA64_Run(self.ptr) }
     }
@@ -197,7 +197,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn step(&mut self) -> crate::HaltReason {
         unsafe extern "C" {
-            pub fn JitA64_Step(this: *mut InternalJit) -> crate::HaltReason;
+            pub fn JitA64_Step(this: *mut Jit) -> crate::HaltReason;
         }
         unsafe { JitA64_Step(self.ptr) }
     }
@@ -207,18 +207,18 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn clear_cache(&mut self) {
         unsafe extern "C" {
-            pub fn JitA64_ClearCache(this: *mut InternalJit);
+            pub fn JitA64_ClearCache(this: *mut Jit);
         }
         unsafe { JitA64_ClearCache(self.ptr) }
     }
 
     /// Invalidate the code cache at a range of addresses.
-    /// @param start_address The starting address of the range to invalidate.
-    /// @param length The length (in bytes) of the range to invalidate.
+    /// - `start_address` - The starting address of the range to invalidate.
+    /// - `length` - The length (in bytes) of the range to invalidate.
     #[inline]
     pub fn invalidate_cache_range(&mut self, start_addr: VAddr, length: usize) {
         unsafe extern "C" {
-            pub fn JitA64_InvalidateCacheRange(this: *mut InternalJit, start_address: u64, length: usize);
+            pub fn JitA64_InvalidateCacheRange(this: *mut Jit, start_address: u64, length: usize);
         }
         unsafe { JitA64_InvalidateCacheRange(self.ptr, start_addr, length) }
     }
@@ -228,16 +228,16 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn reset(&mut self) {
         unsafe extern "C" {
-            pub fn JitA64_Reset(this: *mut InternalJit);
+            pub fn JitA64_Reset(this: *mut Jit);
         }
         unsafe { JitA64_Reset(self.ptr) }
     }
 
-    /// Stops execution during [Jit::run].
+    /// Stops execution during [Dynarmic::run].
     #[inline]
-    pub unsafe fn halt(&mut self, hr: crate::HaltReason) {
+    pub fn halt(&mut self, hr: crate::HaltReason) {
         unsafe extern "C" {
-            pub fn JitA64_HaltExecution(this: *mut InternalJit, hr: crate::HaltReason);
+            pub fn JitA64_HaltExecution(this: *mut Jit, hr: crate::HaltReason);
         }
         unsafe { JitA64_HaltExecution(self.ptr, hr) }
     }
@@ -246,7 +246,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub unsafe fn clear_halt(&mut self, hr: crate::HaltReason) {
         unsafe extern "C" {
-            pub fn JitA64_ClearHalt(this: *mut InternalJit, hr: crate::HaltReason);
+            pub fn JitA64_ClearHalt(this: *mut Jit, hr: crate::HaltReason);
         }
         unsafe { JitA64_ClearHalt(self.ptr, hr) }
     }
@@ -255,7 +255,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_sp(&self) -> u64 {
         unsafe extern "C" {
-            pub fn JitA64_GetSP(this: *const InternalJit) -> u64;
+            pub fn JitA64_GetSP(this: *const Jit) -> u64;
         }
         unsafe { JitA64_GetSP(self.ptr) }
     }
@@ -264,7 +264,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_sp(&mut self, sp: u64) {
         unsafe extern "C" {
-            pub fn JitA64_SetSP(this: *mut InternalJit, value: u64);
+            pub fn JitA64_SetSP(this: *mut Jit, value: u64);
         }
         unsafe { JitA64_SetSP(self.ptr, sp) }
     }
@@ -273,7 +273,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_pc(&self) -> u64 {
         unsafe extern "C" {
-            pub fn JitA64_GetPC(this: *const InternalJit) -> u64;
+            pub fn JitA64_GetPC(this: *const Jit) -> u64;
         }
         unsafe { JitA64_GetPC(self.ptr) }
     }
@@ -282,7 +282,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_pc(&mut self, pc: u64) {
         unsafe extern "C" {
-            pub fn JitA64_SetPC(this: *mut InternalJit, value: u64);
+            pub fn JitA64_SetPC(this: *mut Jit, value: u64);
         }
         unsafe { JitA64_SetPC(self.ptr, pc) }
     }
@@ -291,7 +291,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_reg(&self, index: usize) -> u64 {
         unsafe extern "C" {
-            pub fn JitA64_GetReg(this: *const InternalJit, index: usize) -> u64;
+            pub fn JitA64_GetReg(this: *const Jit, index: usize) -> u64;
         }
         unsafe { JitA64_GetReg(self.ptr, index as _) }
     }
@@ -306,7 +306,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_reg(&mut self, index: usize, val: u64) {
         unsafe extern "C" {
-            pub fn JitA64_SetReg(this: *mut InternalJit, index: usize, value: u64);
+            pub fn JitA64_SetReg(this: *mut Jit, index: usize, value: u64);
         }
         unsafe { JitA64_SetReg(self.ptr, index as _, val) }
     }
@@ -315,7 +315,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_regs(&self) -> [u64; 31] {
         unsafe extern "C" {
-            pub fn JitA64_GetRegs(this: *mut InternalJit, out: *mut [u64; 31]) -> *mut u8;
+            pub fn JitA64_GetRegs(this: *mut Jit, out: *mut [u64; 31]) -> *mut u8;
         }
         let mut regs = [0u64; 31];
         unsafe { JitA64_GetRegs(self.ptr, &mut regs as _); }
@@ -326,7 +326,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_regs(&mut self, regs: &[u64; 31]) {
         unsafe extern "C" {
-            pub fn JitA64_SetRegs(this: *mut InternalJit, out: *const u8);
+            pub fn JitA64_SetRegs(this: *mut Jit, out: *const u8);
         }
         unsafe { JitA64_SetRegs(self.ptr, regs.as_ptr().cast()) }
     }
@@ -335,7 +335,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_vector(&self, index: usize) -> u128 {
         unsafe extern "C" {
-            pub fn JitA64_GetVector(this: *const InternalJit, index: usize) -> u128; // todo: msvc?
+            pub fn JitA64_GetVector(this: *const Jit, index: usize) -> u128; // todo: msvc?
         }
         unsafe { JitA64_GetVector(self.ptr, index as _) }
     }
@@ -344,7 +344,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_vector(&mut self, index: usize, val: u128) {
         unsafe extern "C" {
-            pub fn JitA64_SetVector(this: *mut InternalJit, index: usize, value: u128);
+            pub fn JitA64_SetVector(this: *mut Jit, index: usize, value: u128);
         }
         unsafe { JitA64_SetVector(self.ptr, index as _, val) }
     }
@@ -353,7 +353,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_vectors(&self) -> [u128; 32] {
         unsafe extern "C" {
-            pub fn JitA64_GetVectors(this: *mut InternalJit, out: *mut [u128; 32]) -> *mut u8;
+            pub fn JitA64_GetVectors(this: *mut Jit, out: *mut [u128; 32]) -> *mut u8;
         }
         let mut regs = [0u128; 32];
         unsafe { JitA64_GetVectors(self.ptr, &mut regs as _); }
@@ -364,7 +364,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_vectors(&mut self, regs: &[u128; 32]) {
         unsafe extern "C" {
-            pub fn JitA64_SetVectors(this: *mut InternalJit, value: *const u8);
+            pub fn JitA64_SetVectors(this: *mut Jit, value: *const u8);
         }
         unsafe { JitA64_SetVectors(self.ptr, regs.as_ptr().cast()) }
     }
@@ -373,7 +373,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_fpcr(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA64_GetFpcr(this: *const InternalJit) -> u32;
+            pub fn JitA64_GetFpcr(this: *const Jit) -> u32;
         }
         unsafe { JitA64_GetFpcr(self.ptr) }
     }
@@ -382,7 +382,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_fpcr(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA64_SetFpcr(this: *mut InternalJit, value: u32, );
+            pub fn JitA64_SetFpcr(this: *mut Jit, value: u32, );
         }
         unsafe { JitA64_SetFpcr(self.ptr, val) }
     }
@@ -391,7 +391,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_fpsr(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA64_GetFpsr(this: *const InternalJit) -> u32;
+            pub fn JitA64_GetFpsr(this: *const Jit) -> u32;
         }
         unsafe { JitA64_GetFpsr(self.ptr) }
     }
@@ -400,7 +400,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_fpsr(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA64_SetFpsr(this: *mut InternalJit, value: u32);
+            pub fn JitA64_SetFpsr(this: *mut Jit, value: u32);
         }
         unsafe { JitA64_SetFpsr(self.ptr, val) }
     }
@@ -409,7 +409,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_pstate(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA64_GetPstate(this: *const InternalJit) -> u32;
+            pub fn JitA64_GetPstate(this: *const Jit) -> u32;
         }
         unsafe { JitA64_GetPstate(self.ptr) }
     }
@@ -418,7 +418,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_pstate(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA64_SetPstate(this: *mut InternalJit, value: u32);
+            pub fn JitA64_SetPstate(this: *mut Jit, value: u32);
         }
         unsafe { JitA64_SetPstate(self.ptr, val) }
     }
@@ -427,7 +427,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn clear_exclusive_state(&mut self) {
         unsafe extern "C" {
-            pub fn JitA64_ClearExclusiveState(this: *mut InternalJit);
+            pub fn JitA64_ClearExclusiveState(this: *mut Jit);
         }
         unsafe { JitA64_ClearExclusiveState(self.ptr) }
     }
@@ -437,13 +437,13 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn is_executing(&self) -> bool {
         unsafe extern "C" {
-            pub fn JitA64_IsExecuting(this: *const InternalJit) -> bool;
+            pub fn JitA64_IsExecuting(this: *const Jit) -> bool;
         }
         unsafe { JitA64_IsExecuting(self.ptr) }
     }
 }
 
-impl<T: Callbacks> Deref for Jit<T> {
+impl<T: Callbacks> Deref for Dynarmic<T> {
     type Target = CallbackRef<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -451,7 +451,7 @@ impl<T: Callbacks> Deref for Jit<T> {
     }
 }
 
-impl<T: Callbacks> DerefMut for Jit<T> {
+impl<T: Callbacks> DerefMut for Dynarmic<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cpp_cb.as_mut()
     }
@@ -468,7 +468,7 @@ impl<T: Callbacks> Config<T> {
             callbacks: unsafe { std::mem::zeroed() },
             processor_id: 0,
             global_monitor: unsafe { std::mem::zeroed() }, // todo
-            optimizations: crate::OptimizationFlag::AllSafe,
+            optimizations: crate::OptimizationFlag::ALL,
             unsafe_optimizations: false,
             hook_data_cache_operations: false,
             hook_isb: false,
@@ -499,13 +499,13 @@ impl<T: Callbacks> Config<T> {
             very_verbose_debugging_output: false,
         }, cb: Box::new(cb) }
     }
-    pub fn build<'cb>(self) -> Jit<T> {
+    pub fn build(self) -> Dynarmic<T> {
         let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
-            vtable: unsafe { (&Jit::<T>::CALLBACKS as *const A64CallbacksVTable<T> as *const ()).byte_add(VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
+            vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const A64CallbacksVTable<T> as *const ()).byte_add(VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
             ptr: self.cb.as_ref() as *const _ as *mut _,
         });
 
-        Jit {
+        Dynarmic {
             ptr: unsafe { &mut *crate::cxx::new_a64_jit_t(self.config, cpp_cb.as_mut()) },
             cpp_cb,
             rust_cb: self.cb,
@@ -533,7 +533,7 @@ impl<T: Callbacks> Config<T> {
     /// # Safety
     /// - `ptr` must be a valid pointer pointing to a correctly sized memory space allocated with read/write access.
     pub unsafe fn fastmem(&mut self, ptr: *mut std::ffi::c_void, address_space_bits: usize, recompile_on_fault: bool, silently_mirror: bool) -> &mut Self {
-        self.config.fastmem_pointer = unsafe { std::mem::transmute::<_, usize>(ptr).into() };
+        self.config.fastmem_pointer = (ptr as usize).into();
         self.config.page_table_address_space_bits = address_space_bits;
         self.config.recompile_on_fastmem_failure = recompile_on_fault;
         self.config.silently_mirror_fastmem = silently_mirror;

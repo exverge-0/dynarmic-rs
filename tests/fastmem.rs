@@ -1,9 +1,7 @@
 mod a32 {
-    use dynarmic::a32::{Callbacks, Config, VAddr};
-    use num_traits::{PrimInt, Unsigned};
+    use dynarmic::a32::{Callbacks, VAddr};
+    use dynarmic::{CallbackRef, DynarmicA32, GuestInt};
     use std::cmp::Ordering;
-    use dynarmic::CallbackRef;
-
     struct ArmFastmemTestEnv {
         ticks_left: u64,
         backing_memory: *mut u8,
@@ -19,7 +17,7 @@ mod a32 {
     }
 
     impl Callbacks for ArmFastmemTestEnv {
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &CallbackRef<Self>, addr: VAddr) -> T {
+        extern "C" fn memory_read<T>(cb: &CallbackRef<Self>, addr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -28,7 +26,7 @@ mod a32 {
             }
         }
 
-        extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T) {
+        extern "C" fn memory_write<T>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T) {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -37,7 +35,7 @@ mod a32 {
             }
         }
 
-        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(
+        extern "C" fn memory_write_exclusive<T: GuestInt>(
             cb: &mut CallbackRef<Self>,
             addr: VAddr,
             val: T,
@@ -79,7 +77,7 @@ mod a32 {
             let mut env = ArmFastmemTestEnv::new(ptr);
             env.ticks_left = 3;
 
-            let mut config = Config::new(env);
+            let mut config = DynarmicA32::new(env);
 
             config.fastmem(ptr.cast(), false)
                 .processor_id(0);
@@ -115,10 +113,9 @@ mod a32 {
     }
 }
 mod a64 {
-    use dynarmic::a64::{Callbacks, Config, VAddr};
-    use num_traits::{PrimInt, Unsigned};
+    use dynarmic::a64::{Callbacks, VAddr};
+    use dynarmic::{CallbackRef, DynarmicA64, GuestInt};
     use std::cmp::Ordering;
-    use dynarmic::CallbackRef;
 
     #[repr(C)]
     struct A64FastmemTestEnv {
@@ -152,7 +149,7 @@ mod a64 {
                     .copy_from_nonoverlapping(&val, 1);
             }
         }
-        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(
+        extern "C" fn memory_write_exclusive<T: GuestInt>(
             cb: &mut CallbackRef<Self>,
             addr: VAddr,
             val: T,
@@ -195,7 +192,7 @@ mod a64 {
 
             let mut env = A64FastmemTestEnv::new(ptr);
             env.ticks_left = 5;
-            let mut config = Config::new(env);
+            let mut config = DynarmicA64::new(env);
             config.fastmem(ptr as *mut _, address_width, false, true)
                 .processor_id(0);
 

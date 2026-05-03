@@ -1,7 +1,6 @@
 use crate::internal::{A32CallbacksVTable, A32Config, VTABLE_DIFF};
 
-use crate::{cxx::CxxOptional, CallbackRef, OptimizationFlag};
-use num_traits::{PrimInt, Unsigned};
+use crate::{cxx::CxxOptional, CallbackRef, GuestInt, OptimizationFlag};
 use std::ops::{Deref, DerefMut};
 
 pub type VAddr = u32;
@@ -53,10 +52,14 @@ pub enum ArchVersion {
 }
 
 #[repr(C)]
-pub struct IREmitter; // TODO
+pub struct IREmitter {
+    _ffi: u8, // TODO
+}
 
 #[repr(C)]
-pub struct Coprocessor; // TODO
+pub struct Coprocessor {
+    _ffi: u8, // TODO
+}
 
 #[repr(i32)]
 pub enum CoprocReg {
@@ -85,17 +88,6 @@ pub trait Callbacks : Sized {
     /// Memory must be interpreted as little endian.
     fn memory_read_code(cb: &CallbackRef<Self>, addr: VAddr) -> Option<u32> { Some(Self::memory_read(cb, addr)) }
 
-    #[cfg(not(target_env = "msvc"))]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<Self>, addr: VAddr) -> CxxOptional<u32> {
-        Self::memory_read_code(cb, addr).unwrap_or(0).into()
-    }
-    #[cfg(target_env = "msvc")]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<Self>, out: *mut CxxOptional<u32>, addr: VAddr) {
-        unsafe {
-            *out = Self::memory_read_code(cb, addr).unwrap_or(0).into();
-        }
-    }
-
     /// This function is called before the instruction at pc is read.
     /// IR code can be emitted by the callee prior to instruction handling.
     /// By returning true the callee precludes the translation of the instruction;
@@ -113,9 +105,9 @@ pub trait Callbacks : Sized {
         1
     }
 
-    extern "C" fn memory_read<T: PrimInt + Unsigned>(cb: &CallbackRef<Self>, addr: VAddr) -> T;
-    extern "C" fn memory_write<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
-    extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
+    extern "C" fn memory_read<T: GuestInt>(cb: &CallbackRef<Self>, addr: VAddr) -> T;
+    extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
+    extern "C" fn memory_write_exclusive<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
 
     /// If this callback returns true, the JIT will assume MemoryRead* callbacks will always
     /// return the same value at any point in time for this vaddr. The JIT may use this information
@@ -135,10 +127,7 @@ pub trait Callbacks : Sized {
         )
     }
     extern "C" fn raised_exception(_cb: &mut CallbackRef<Self>, addr: VAddr, exc: Exception) {
-        panic!(
-            "dynarmic: Unhandled exception '{:?}' at '0x{:X}'",
-            exc, addr
-        )
+        panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'", )
     }
     extern "C" fn call_svc(cb: &mut CallbackRef<Self>, swi: u32);
     extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackRef<Self>) {}
@@ -149,23 +138,23 @@ pub trait Callbacks : Sized {
 }
 
 #[repr(C)]
-pub(crate) struct InternalJit {
+pub(crate) struct Jit {
     is_executing: bool,
     _ptr: u64
 }
 
-const _: () = assert!(size_of::<InternalJit>() == 16);
+const _: () = assert!(size_of::<Jit>() == 16);
 
 /// A Rust-safe wrapper of Dynarmic's A32 Jit.
 /// This type can be constructed with [Config].
 #[allow(dead_code)]
-pub struct Jit<T: Callbacks> {
-    ptr: *mut InternalJit,
+pub struct Dynarmic<T: Callbacks> {
+    ptr: *mut Jit,
     cpp_cb: Box<CallbackRef<T>>,
     rust_cb: Box<T>,
 }
 
-impl<T: Callbacks> Drop for Jit<T> {
+impl<T: Callbacks> Drop for Dynarmic<T> {
     fn drop(&mut self) {
         unsafe {
             crate::cxx::delete_a32_jit(self.ptr)
@@ -173,13 +162,25 @@ impl<T: Callbacks> Drop for Jit<T> {
     }
 }
 
-impl<T: Callbacks> Jit<T> {
+impl<T: Callbacks> Dynarmic<T> {
+
+    #[cfg(not(target_env = "msvc"))]
+    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> CxxOptional<u32> {
+        T::memory_read_code(cb, addr).unwrap_or(0).into()
+    }
+    #[cfg(target_env = "msvc")]
+    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, out: *mut CxxOptional<u32>, addr: VAddr) {
+        unsafe {
+            *out = T::memory_read_code(cb, addr).unwrap_or(0).into();
+        }
+    }
+
     const CALLBACKS: A32CallbacksVTable<T> = A32CallbacksVTable {
         #[cfg(not(target_env = "msvc"))]
         offset_to_top: 0,
         #[cfg(not(target_env = "msvc"))]
         typeinfo: unsafe { std::mem::zeroed() },
-        memory_read_code: T::memory_read_code_impl,
+        memory_read_code: Self::memory_read_code_impl,
         pre_code_read_hook: T::pre_code_read_hook,
         pre_code_translation_hook: T::pre_code_translation_hook,
         get_ticks_for_code: T::get_ticks_for_code,
@@ -206,17 +207,22 @@ impl<T: Callbacks> Jit<T> {
         add_ticks: T::add_ticks,
         get_ticks_remaining: T::get_ticks_remaining,
     };
+    
+    #[inline]
+    pub fn new(cb: T) -> Config<T> {
+        Config::new(cb)
+    }
 
     /// Runs the emulated CPU.
     /// Cannot be recursively called.
-    /// # Safety:
+    /// # Safety
     /// - All instructions and memory addresses inputted must be valid. Invalid addresses/instructions will cause dynarmic exceptions, which panic by default.
     /// - Some ARM coprocessor instructions may be forwarded to [Coprocessor] callbacks; if these are unhandled (e.g. no coprocessors provided), this may result in a C++ exception, making this function inherently unsafe.
     // TODO: make this function safe
     #[inline]
     pub unsafe fn run(&mut self) -> crate::HaltReason {
         unsafe extern "C" {
-            pub fn JitA32_Run(this: *mut InternalJit) -> crate::HaltReason;
+            pub fn JitA32_Run(this: *mut Jit) -> crate::HaltReason;
         }
         unsafe { JitA32_Run(self.ptr) }
     }
@@ -226,7 +232,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn step(&mut self) -> crate::HaltReason {
         unsafe extern "C" {
-            pub fn JitA32_Step(this: *mut InternalJit) -> crate::HaltReason;
+            pub fn JitA32_Step(this: *mut Jit) -> crate::HaltReason;
         }
         unsafe { JitA32_Step(self.ptr) }
     }
@@ -236,18 +242,18 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn clear_cache(&mut self) {
         unsafe extern "C" {
-            pub fn JitA32_ClearCache(this: *mut InternalJit);
+            pub fn JitA32_ClearCache(this: *mut Jit);
         }
         unsafe { JitA32_ClearCache(self.ptr) }
     }
 
     /// Invalidate the code cache at a range of addresses.
-    /// @param start_address The starting address of the range to invalidate.
-    /// @param length The length (in bytes) of the range to invalidate.
+    /// - `start_address` - The starting address of the range to invalidate.
+    /// - `length` - The length (in bytes) of the range to invalidate.
     #[inline]
     pub fn invalidate_cache_range(&mut self, start_addr: VAddr, length: usize) {
         unsafe extern "C" {
-            pub fn JitA32_InvalidateCacheRange(this: *mut InternalJit, start_address: u32, length: usize);
+            pub fn JitA32_InvalidateCacheRange(this: *mut Jit, start_address: u32, length: usize);
         }
         unsafe { JitA32_InvalidateCacheRange(self.ptr, start_addr, length) }
     }
@@ -257,16 +263,16 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn reset(&mut self) {
         unsafe extern "C" {
-            pub fn JitA32_Reset(this: *mut InternalJit);
+            pub fn JitA32_Reset(this: *mut Jit);
         }
         unsafe { JitA32_Reset(self.ptr) }
     }
 
-    /// Stops execution during [Jit::run].
+    /// Stops execution during [Dynarmic::run].
     #[inline]
     pub fn halt(&mut self, hr: crate::HaltReason) {
         unsafe extern "C" {
-            pub fn JitA32_HaltExecution(this: *mut InternalJit, hr: crate::HaltReason);
+            pub fn JitA32_HaltExecution(this: *mut Jit, hr: crate::HaltReason);
         }
         unsafe { JitA32_HaltExecution(self.ptr, hr) }
     }
@@ -275,7 +281,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub unsafe fn clear_halt(&mut self, hr: crate::HaltReason) {
         unsafe extern "C" {
-            pub fn JitA32_ClearHalt(this: *mut InternalJit, hr: crate::HaltReason);
+            pub fn JitA32_ClearHalt(this: *mut Jit, hr: crate::HaltReason);
         }
         unsafe { JitA32_ClearHalt(self.ptr, hr) }
     }
@@ -284,7 +290,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_regs(&self) -> &[u32; 16] {
         unsafe extern "C" {
-            pub fn JitA32_Regs(this: *mut InternalJit) -> *mut u8;
+            pub fn JitA32_Regs(this: *mut Jit) -> *mut u8;
         }
         unsafe { &*(JitA32_Regs(self.ptr).cast::<[u32; 16]>()) }
     }
@@ -293,7 +299,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_regs(&mut self, regs: [u32; 16]) {
         unsafe extern "C" {
-            pub fn JitA32_Regs(this: *mut InternalJit) -> *mut u8;
+            pub fn JitA32_Regs(this: *mut Jit) -> *mut u8;
         }
         unsafe {
             std::ptr::copy_nonoverlapping(regs.as_ptr(), JitA32_Regs(self.ptr).cast(), 16);
@@ -304,7 +310,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_extregs(&self) -> &[u32; 64] {
         unsafe extern "C" {
-            pub fn JitA32_ExtRegs(this: *mut InternalJit) -> *mut u8;
+            pub fn JitA32_ExtRegs(this: *mut Jit) -> *mut u8;
         }
         unsafe { &*(JitA32_ExtRegs(self.ptr).cast::<[u32; 64]>()) }
     }
@@ -313,7 +319,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_extregs(&self, regs: [u32; 64]) {
         unsafe extern "C" {
-            pub fn JitA32_ExtRegs(this: *mut InternalJit) -> *mut u8;
+            pub fn JitA32_ExtRegs(this: *mut Jit) -> *mut u8;
         }
         unsafe {
             std::ptr::copy_nonoverlapping(regs.as_ptr(), JitA32_ExtRegs(self.ptr).cast(), 64);
@@ -361,7 +367,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_cpsr(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA32_Cpsr(this: *const InternalJit) -> u32;
+            pub fn JitA32_Cpsr(this: *const Jit) -> u32;
         }
         unsafe { JitA32_Cpsr(self.ptr) }
     }
@@ -370,7 +376,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_cpsr(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA32_SetCpsr(this: *mut InternalJit, value: u32);
+            pub fn JitA32_SetCpsr(this: *mut Jit, value: u32);
         }
         unsafe { JitA32_SetCpsr(self.ptr, val) }
     }
@@ -379,7 +385,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn get_fpscr(&self) -> u32 {
         unsafe extern "C" {
-            pub fn JitA32_Fpscr(this: *const InternalJit) -> u32;
+            pub fn JitA32_Fpscr(this: *const Jit) -> u32;
         }
         unsafe { JitA32_Fpscr(self.ptr) }
     }
@@ -388,7 +394,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn set_fpscr(&mut self, val: u32) {
         unsafe extern "C" {
-            pub fn JitA32_SetFpscr(this: *mut InternalJit, value: u32, );
+            pub fn JitA32_SetFpscr(this: *mut Jit, value: u32, );
         }
         unsafe { JitA32_SetFpscr(self.ptr, val) }
     }
@@ -397,7 +403,7 @@ impl<T: Callbacks> Jit<T> {
     #[inline]
     pub fn clear_exclusive_state(&mut self) {
         unsafe extern "C" {
-            pub fn JitA32_ClearExclusiveState(this: *mut InternalJit);
+            pub fn JitA32_ClearExclusiveState(this: *mut Jit);
         }
         unsafe { JitA32_ClearExclusiveState(self.ptr) }
     }
@@ -410,7 +416,7 @@ impl<T: Callbacks> Jit<T> {
     }
 }
 
-impl<T: Callbacks> Deref for Jit<T> {
+impl<T: Callbacks> Deref for Dynarmic<T> {
     type Target = CallbackRef<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -418,7 +424,7 @@ impl<T: Callbacks> Deref for Jit<T> {
     }
 }
 
-impl<T: Callbacks> DerefMut for Jit<T> {
+impl<T: Callbacks> DerefMut for Dynarmic<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cpp_cb.as_mut()
     }
@@ -436,7 +442,7 @@ impl<T: Callbacks> Config<T> {
             processor_id: 0,
             global_monitor: unsafe { std::mem::zeroed() }, // todo
             arch_version: ArchVersion::V8,
-            optimizations: OptimizationFlag::AllSafe,
+            optimizations: OptimizationFlag::ALL,
             unsafe_optimizations: false,
             page_table: std::ptr::null_mut(),
             absolute_offset_page_table: false,
@@ -459,13 +465,13 @@ impl<T: Callbacks> Config<T> {
             very_verbose_debugging_output: false,
         }, cb: Box::new(cb) }
     }
-    pub fn build<'cb>(self) -> Jit<T> {
+    pub fn build(self) -> Dynarmic<T> {
         let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
-            vtable: unsafe { (&Jit::<T>::CALLBACKS as *const A32CallbacksVTable<T> as *const ()).byte_add(VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
+            vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const A32CallbacksVTable<T> as *const ()).byte_add(VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
             ptr: self.cb.as_ref() as *const _ as *mut _,
         });
 
-        Jit {
+        Dynarmic {
             ptr: unsafe { &mut *crate::cxx::new_a32_jit_t(self.config, cpp_cb.as_mut()) },
             cpp_cb,
             rust_cb: self.cb,
@@ -482,13 +488,13 @@ impl<T: Callbacks> Config<T> {
     /// Sets the fastmem pointer and determines whether dynarmic should recompile without fastmem
     /// if a pagefault is reached.
     /// 
-    /// # Safety:
+    /// # Safety
     /// - `ptr` must be a valid pointer pointing to a memory space allocated with read/write access.
     /// - The guest code should not attempt to access outside the memory range of `ptr`. Note that dynarmic will not fallback to [memory_read](Callbacks::memory_read)/[memory_write](Callbacks::memory_write)
-    /// when exceeding the fastmem address space as it does not know the size.
+    ///   when exceeding the fastmem address space as it does not know the size.
     /// 
     pub unsafe fn fastmem(&mut self, ptr: *mut std::ffi::c_void, recompile_on_fault: bool) -> &mut Self {
-        self.config.fastmem_pointer = unsafe { std::mem::transmute::<_, usize>(ptr).into() };
+        self.config.fastmem_pointer = (ptr as usize).into();
         self.config.recompile_on_fastmem_failure = recompile_on_fault;
         
         self

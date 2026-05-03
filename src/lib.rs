@@ -1,11 +1,18 @@
 pub(crate) mod internal;
-pub mod cxx;
+pub(crate) mod cxx;
 pub mod a32;
 pub mod a64;
 
-use bitflags::bitflags;
+pub use cxx::{CxxOptional, CxxVector, CxxSharedPtr};
+pub use a32::Dynarmic as DynarmicA32;
+pub use a64::Dynarmic as DynarmicA64;
+
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
+
+/// Integer type used for memory reads and writes.
+pub trait GuestInt : num_traits::PrimInt + num_traits::Unsigned {}
+impl<T> GuestInt for T where T: num_traits::PrimInt + num_traits::Unsigned {}
 
 /// Wrapper struct for a mutable reference to a type implementing dynarmic Callbacks.
 #[repr(C)]
@@ -34,52 +41,64 @@ impl<T> DerefMut for CallbackRef<T> {
     }
 }
 
-// todo: can we just inline impl this? we depend on bitflags for only one type
-bitflags! {
-    #[repr(transparent)]
-    pub struct OptimizationFlag: u32 {
-        /// This optimization avoids dispatcher lookups by allowing emitted basic blocks to jump
-        /// directly to other basic blocks if the destination PC is predictable at JIT-time.
-        /// This is a safe optimization.
-        const BlockLinking = 1;
-        /// This optimization avoids dispatcher lookups by emulating a return stack buffer. This
-        /// allows for function returns and syscall returns to be predicted at runtime.
-        /// This is a safe optimization.
-        const ReturnStackBuffer = 2;
-        /// This optimization enables a two-tiered dispatch system.
-        /// A fast dispatcher (written in assembly) first does a look-up in a small MRU cache.
-        /// If this fails, it falls back to the usual slower dispatcher.
-        /// This is a safe optimization.
-        const FastDispatch = 4;
-        /// This is an IR optimization. This optimization eliminates unnecessary emulated CPU state
-        /// context lookups.
-        /// This is a safe optimization.
-        const GetSetElimination = 8;
-        /// This is an IR optimization. This optimization does constant propagation.
-        /// This is a safe optimization.
-        const ConstProp = 16;
-        /// This is enables miscellaneous safe IR optimizations.
-        const MiscIROpt = 32;
-        /// This is an UNSAFE optimization that reduces accuracy of fused multiply-add operations.
-        /// This unfuses fused instructions to improve performance on host CPUs without FMA support.
-        const Unsafe_UnfuseFMA = 65536;
-        /// This is an UNSAFE optimization that reduces accuracy of certain floating-point instructions.
-        /// This allows results of FRECPE and FRSQRTE to have **less** error than spec allows.
-        const Unsafe_ReducedErrorFP = 131072;
-        /// This is an UNSAFE optimization that causes floating-point instructions to not produce correct NaNs.
-        /// This may also result in inaccurate results when instructions are given certain special values.
-        const Unsafe_InaccurateNaN = 262144;
-        /// This is an UNSAFE optimization that causes ASIMD floating-point instructions to be run with incorrect
-        /// rounding modes. This may result in inaccurate results with all floating-point ASIMD instructions.
-        const Unsafe_IgnoreStandardFPCRValue = 524288;
-        /// This is an UNSAFE optimization that causes the global monitor to be ignored. This may
-        /// result in unexpected behaviour in multithreaded scenarios, including but not limited
-        /// to data races and deadlocks.
-        const Unsafe_IgnoreGlobalMonitor = 1048576;
+#[repr(transparent)]
+pub struct OptimizationFlag(u32);
+impl OptimizationFlag {
 
-        const AllSafe = 0x0000FFFF;
-        const None = 0;
-    }
+    /// This optimization avoids dispatcher lookups by allowing emitted basic blocks to jump
+    /// directly to other basic blocks if the destination PC is predictable at JIT-time.
+    /// This is a safe optimization.
+    pub const BLOCK_LINKING: Self = Self(1);
+    
+    /// This optimization avoids dispatcher lookups by emulating a return stack buffer. This
+    /// allows for function returns and syscall returns to be predicted at runtime.
+    /// This is a safe optimization.
+    pub const RETURN_STACK_BUFFER : Self = Self(2);
+    
+    /// This optimization enables a two-tiered dispatch system.
+    /// A fast dispatcher (written in assembly) first does a look-up in a small MRU cache.
+    /// If this fails, it falls back to the usual slower dispatcher.
+    /// This is a safe optimization.
+    pub const FAST_DISPATCH : Self = Self(4);
+    
+    /// This is an IR optimization. This optimization eliminates unnecessary emulated CPU state
+    /// context lookups.
+    /// This is a safe optimization.
+    pub const GET_SET_ELIMINATION : Self = Self(8);
+    
+    /// This is an IR optimization. This optimization does constant propagation.
+    /// This is a safe optimization.
+    pub const CONST_PROP : Self = Self(16);
+    
+    /// This is enables miscellaneous safe IR optimizations.
+    pub const MISC_IR_OPT : Self = Self(32);
+    
+    /// This is an UNSAFE optimization that reduces accuracy of fused multiply-add operations.
+    /// This unfuses fused instructions to improve performance on host CPUs without FMA support.
+    pub const UNSAFE_UNFUSE_FMA : Self = Self(65536);
+    
+    /// This is an UNSAFE optimization that reduces accuracy of certain floating-point instructions.
+    /// This allows results of FRECPE and FRSQRTE to have **less** error than spec allows.
+    pub const UNSAFE_REDUCED_ERROR_FP : Self = Self(131072);
+    
+    /// This is an UNSAFE optimization that causes floating-point instructions to not produce correct NaNs.
+    /// This may also result in inaccurate results when instructions are given certain special values.
+    pub const UNSAFE_INACCURATENAN : Self = Self(262144);
+    
+    /// This is an UNSAFE optimization that causes ASIMD floating-point instructions to be run with incorrect
+    /// rounding modes. This may result in inaccurate results with all floating-point ASIMD instructions.
+    pub const UNSAFE_IGNORE_STANDARD_FPCR_VALUE : Self = Self(524288);
+    
+    /// This is an UNSAFE optimization that causes the global monitor to be ignored. This may
+    /// result in unexpected behaviour in multithreaded scenarios, including but not limited
+    /// to data races and deadlocks.
+    pub const UNSAFE_IGNORE_GLOBALMONITOR : Self = Self(1048576);
+    
+
+    /// All safe optimizations. 
+    /// The default used by dynarmic.
+    pub const ALL : Self = Self(0x0000FFFF);
+    pub const NONE : Self = Self(0);
 }
 
 #[repr(u32)]

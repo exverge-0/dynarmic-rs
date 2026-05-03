@@ -80,6 +80,7 @@ pub struct A32Config<T> {
     /// - IR optimizations
     /// - Block linking optimizations
     /// - RSB optimizations
+    ///
     /// This is intended to be used for debugging.
     pub optimizations: OptimizationFlag,
     /// This enables unsafe optimizations that reduce emulation accuracy in favour of speed.
@@ -213,6 +214,7 @@ pub struct A64Config<T> {
     /// - IR optimizations
     /// - Block linking optimizations
     /// - RSB optimizations
+    ///
     /// This is intended to be used for debugging.
     pub optimizations: OptimizationFlag,
     /// This enables unsafe optimizations that reduce emulation accuracy in favour of speed.

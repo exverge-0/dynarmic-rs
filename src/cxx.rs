@@ -1,12 +1,9 @@
-use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 /// Empty struct representing C++'s `std::string` in generic types.
 /// This cannot be not be used as an owned value and should only be interacted with using C shims or FFI crates like `cxx`.
 #[repr(C)]
-pub struct CxxString {
-    _ffi: PhantomData<u8>
-}
+pub struct CxxString(*const ());
 
 /// Rust struct representing C++ `std::vector<T, Allocator>`.
 /// This type cannot be constructed in Rust.
@@ -14,33 +11,32 @@ pub struct CxxString {
 /// - This type is used solely with Dynarmic's functions, and cannot be used to hold any type other than [u128], [u64], and [C++ `std::string`](CppString).
 /// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate.
 /// - Though the public interface is generally constant, C++ vectors are implementation specific and unsafe to interact with in Rust.
-// todo: implement conversions for cxx::CxxVector?
 #[allow(private_bounds)]
 #[repr(C)]
 pub struct CxxVector<T: CppVectorElement> {
     __data: [*mut T; 3],
 }
 
-unsafe trait CppVectorElement: Sized {
+trait CppVectorElement: Sized {
     /// Reserved for use by [dynarmic] crate. Do not use.
     unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>);
 }
 
-unsafe impl CppVectorElement for CxxString {
+impl CppVectorElement for CxxString {
     unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
         unsafe {
-            destroy_vec_cppstring(std::mem::transmute(vec));
+            destroy_vec_cppstring(vec);
         }
     }
 }
-unsafe impl CppVectorElement for u64 {
+impl CppVectorElement for u64 {
     unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
         unsafe {
             destroy_vec_u64(vec);
         }
     }
 }
-unsafe impl CppVectorElement for u128 {
+impl CppVectorElement for u128 {
     unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
         unsafe {
             destroy_vec_u128(vec);
@@ -51,7 +47,7 @@ unsafe impl CppVectorElement for u128 {
 impl<T: CppVectorElement> Drop for CxxVector<T> {
     fn drop(&mut self) {
         unsafe {
-            T::__cpp_vector_drop(std::mem::transmute(self));
+            T::__cpp_vector_drop(self);
         }
     }
 }
@@ -115,7 +111,7 @@ impl CxxSharedPtr<crate::a32::Coprocessor> {
             let mut optional: MaybeUninit<CxxSharedPtr<crate::a32::Coprocessor>> = MaybeUninit::uninit();
             new_coprocessor(
                 optional.as_mut_ptr(),
-                std::mem::transmute(&coprocessor),
+                &coprocessor as *const _,
             );
             optional.assume_init()
         }
@@ -128,10 +124,10 @@ impl Default for CxxSharedPtr<crate::a32::Coprocessor> {
     }
 }
 
-pub(crate) use bindings::*;
-pub(crate) mod bindings {
-    use crate::CallbackRef;
+pub use bindings::*;
+mod bindings {
     use crate::cxx::{CxxOptional, CxxSharedPtr, CxxString, CxxVector};
+    use crate::CallbackRef;
 
     unsafe extern "C" {
         pub fn destroy_vec_cppstring(vec: *mut CxxVector<CxxString>);
@@ -152,17 +148,17 @@ pub(crate) mod bindings {
         );
         pub fn new_coprocessor(
             out: *mut CxxSharedPtr<crate::a32::Coprocessor>,
-            ptr: *mut crate::a32::Coprocessor,
+            ptr: *const crate::a32::Coprocessor,
         );
         
-        pub fn new_a32_jit(conf: *mut crate::internal::A32Config<u8>) -> *mut crate::a32::InternalJit;
-        pub fn delete_a32_jit(ptr: *mut crate::a32::InternalJit);
+        pub fn new_a32_jit(conf: *mut crate::internal::A32Config<u8>) -> *mut crate::a32::Jit;
+        pub fn delete_a32_jit(ptr: *mut crate::a32::Jit);
         
-        pub fn new_a64_jit(conf: *mut crate::internal::A64Config<u8>, ) -> *mut crate::a64::InternalJit;
-        pub fn delete_a64_jit(ptr: *mut crate::a64::InternalJit);
+        pub fn new_a64_jit(conf: *mut crate::internal::A64Config<u8>, ) -> *mut crate::a64::Jit;
+        pub fn delete_a64_jit(ptr: *mut crate::a64::Jit);
     }
     #[inline(always)]
-    pub unsafe fn new_a32_jit_t<T>(mut conf: crate::internal::A32Config<T>, cb: &mut CallbackRef<T>) -> *mut crate::a32::InternalJit {
+    pub unsafe fn new_a32_jit_t<T>(mut conf: crate::internal::A32Config<T>, cb: &mut CallbackRef<T>) -> *mut crate::a32::Jit {
         unsafe {
             conf.callbacks = cb as *mut _;
 
@@ -170,7 +166,7 @@ pub(crate) mod bindings {
         }
     }
     #[inline(always)]
-    pub unsafe fn new_a64_jit_t<T>(mut conf: crate::internal::A64Config<T>, cb: &mut CallbackRef<T>) -> *mut crate::a64::InternalJit {
+    pub unsafe fn new_a64_jit_t<T>(mut conf: crate::internal::A64Config<T>, cb: &mut CallbackRef<T>) -> *mut crate::a64::Jit {
         unsafe {
             conf.callbacks = cb as *mut _;
 

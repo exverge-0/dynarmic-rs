@@ -1,9 +1,8 @@
 mod fastmem;
 
 mod a32 {
-    use dynarmic::a32::{Callbacks, Config, VAddr};
-    use dynarmic::CallbackRef;
-    use num_traits::{PrimInt, Unsigned};
+    use dynarmic::a32::{Callbacks, VAddr};
+    use dynarmic::{CallbackRef, DynarmicA32};
     use std::collections::BTreeMap;
 
     // based off dynarmic testenv
@@ -24,13 +23,13 @@ mod a32 {
             Some(0xEAFFFFFE)
         }
 
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &CallbackRef<Self>, _addr: VAddr) -> T {
+        extern "C" fn memory_read<T>(_cb: &CallbackRef<Self>, _addr: VAddr) -> T {
             unimplemented!()
         }
-        extern "C" fn memory_write<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
+        extern "C" fn memory_write<T>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
             unimplemented!()
         }
-        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T, _expected: T) -> bool {
+        extern "C" fn memory_write_exclusive<T>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T, _expected: T) -> bool {
             unimplemented!()
         }
 
@@ -74,7 +73,7 @@ mod a32 {
             env.code_mem.push(0xeafffffe); // B .
             env.ticks_left = 2;
             
-            let mut jit = Config::new(env).build();
+            let mut jit = DynarmicA32::new(env).build();
 
             jit.set_reg(0, 0);
             jit.set_reg(1, 1);
@@ -91,10 +90,9 @@ mod a32 {
 }
 
 mod a64 {
-    use dynarmic::a64::{Callbacks, Config, VAddr};
-    use dynarmic::CallbackRef;
-    use num_traits::{PrimInt, Unsigned};
+    use dynarmic::{CallbackRef, DynarmicA64};
     use std::collections::BTreeMap;
+    use dynarmic::a64::{Callbacks, VAddr};
 
     // based off dynarmic testenv
     struct A64TestEnv {
@@ -116,13 +114,13 @@ mod a64 {
             let index = (addr - cb.code_mem_start_addr) as usize / 4;
             (*cb.code_mem.get(index).unwrap()).into()
         }
-        extern "C" fn memory_read<T: PrimInt + Unsigned>(_cb: &CallbackRef<Self>, _addr: VAddr) -> T {
+        extern "C" fn memory_read<T>(_cb: &CallbackRef<Self>, _addr: VAddr) -> T {
             unimplemented!()
         }
-        extern "C" fn memory_write<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
+        extern "C" fn memory_write<T>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T) {
             unimplemented!()
         }
-        extern "C" fn memory_write_exclusive<T: PrimInt + Unsigned>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T, _expected: T) -> bool {
+        extern "C" fn memory_write_exclusive<T>(_cb: &mut CallbackRef<Self>, _addr: VAddr, _val: T, _expected: T) -> bool {
             unimplemented!()
         }
 
@@ -172,7 +170,7 @@ mod a64 {
         env.code_mem.push(0x14000000); // B .
         env.ticks_left = 2;
 
-        let mut jit = Config::new(env).build();
+        let mut jit = DynarmicA64::new(env).build();
 
         jit.set_reg(0, 0);
         jit.set_reg(1, 1);
