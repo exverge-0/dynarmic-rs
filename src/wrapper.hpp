@@ -102,11 +102,11 @@ void JitA64_GetRegs(Dynarmic::A64::Jit* jit, std::array<std::uint64_t, 31>* out)
 void JitA64_SetRegs(Dynarmic::A64::Jit* jit, std::array<std::uint64_t, 31>* regs) {
     return jit->SetRegisters(*regs);
 }
-std::array<std::uint64_t, 2> JitA64_GetVector(Dynarmic::A64::Jit* jit, size_t index) {
-    return jit->GetVector(index);
+void JitA64_GetVector(Dynarmic::A64::Jit* jit, std::array<std::uint64_t, 2>* out, size_t index) {
+    *out = jit->GetVector(index);
 }
-void JitA64_SetVector(Dynarmic::A64::Jit* jit, size_t index, std::array<std::uint64_t, 2> val) {
-    return jit->SetVector(index, val);
+void JitA64_SetVector(Dynarmic::A64::Jit* jit, size_t index, std::array<std::uint64_t, 2>* val) {
+    return jit->SetVector(index, *val);
 }
 void JitA64_GetVectors(Dynarmic::A64::Jit* jit, std::array<std::array<std::uint64_t, 2>, 32>* out) {
     auto vec = jit->GetVectors();
@@ -151,10 +151,6 @@ void ExclusiveMonitor_Clear(Dynarmic::ExclusiveMonitor* self) {
 }
 size_t ExclusiveMonitor_GetProcessorCount(Dynarmic::ExclusiveMonitor* self) {
     return self->GetProcessorCount();
-}
-
-void destroy_vec_cppstring(std::vector<std::string>* vec) {
-    vec->~vector();
 }
 
 void destroy_vec_u64(std::vector<std::uint64_t>* vec) {

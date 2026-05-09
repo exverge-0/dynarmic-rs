@@ -335,18 +335,20 @@ impl<T: Callbacks> Dynarmic<T> {
     #[inline]
     pub fn get_vector(&self, index: usize) -> u128 {
         unsafe extern "C" {
-            pub fn JitA64_GetVector(this: *const Jit, index: usize) -> u128; // todo: msvc?
+            pub fn JitA64_GetVector(this: *const Jit, out: *mut u128, index: usize);
         }
-        unsafe { JitA64_GetVector(self.ptr, index as _) }
+        let mut out: u128 = 0;
+        unsafe { JitA64_GetVector(self.ptr, &mut out, index as _) }
+        out
     }
 
     /// Modify floating point/SIMD register. (GPR)
     #[inline]
     pub fn set_vector(&mut self, index: usize, val: u128) {
         unsafe extern "C" {
-            pub fn JitA64_SetVector(this: *mut Jit, index: usize, value: u128);
+            pub fn JitA64_SetVector(this: *mut Jit, index: usize, value: *const u128);
         }
-        unsafe { JitA64_SetVector(self.ptr, index as _, val) }
+        unsafe { JitA64_SetVector(self.ptr, index as _, &val) }
     }
 
     /// Read all floating point and SIMD registers.

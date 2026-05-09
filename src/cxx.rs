@@ -1,10 +1,5 @@
 use std::mem::MaybeUninit;
 
-/// Empty struct representing C++'s `std::string` in generic types.
-/// This cannot be not be used as an owned value and should only be interacted with using C shims or FFI crates like `cxx`.
-#[repr(C)]
-pub struct CxxString(*const ());
-
 /// Rust struct representing C++ `std::vector<T, Allocator>`.
 /// This type cannot be constructed in Rust.
 /// # Safety
@@ -20,14 +15,6 @@ pub struct CxxVector<T: CppVectorElement> {
 trait CppVectorElement: Sized {
     /// Reserved for use by [dynarmic] crate. Do not use.
     unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>);
-}
-
-impl CppVectorElement for CxxString {
-    unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
-        unsafe {
-            destroy_vec_cppstring(vec);
-        }
-    }
 }
 impl CppVectorElement for u64 {
     unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
@@ -126,11 +113,10 @@ impl Default for CxxSharedPtr<crate::a32::Coprocessor> {
 
 pub use bindings::*;
 mod bindings {
-    use crate::cxx::{CxxOptional, CxxSharedPtr, CxxString, CxxVector};
+    use crate::cxx::{CxxOptional, CxxSharedPtr, CxxVector};
     use crate::CallbackRef;
 
     unsafe extern "C" {
-        pub fn destroy_vec_cppstring(vec: *mut CxxVector<CxxString>);
         pub fn destroy_vec_u64(
             vec: *mut CxxVector<u64>,
         );
