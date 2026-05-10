@@ -1,4 +1,4 @@
-use crate::{cxx::CxxOptional, CallbackRef, CxxSharedPtr, GuestInt, OptimizationFlag};
+use crate::{cxx::CxxOptional, cxx::CxxSharedPtr, CallbackRef, GuestInt, OptimizationFlag};
 use std::ops::{Deref, DerefMut};
 pub type VAddr = u32;
 
@@ -68,34 +68,14 @@ pub(crate) struct DynarmicConfig<T> {
     pub fastmem_exclusive_access: bool,
     pub recompile_on_exclusive_fastmem_failure: bool,
     pub coprocessors: [CxxSharedPtr<Coprocessor>; 16],
-    /// When set to true, UserCallbacks::InstructionSynchronizationBarrierRaised will be
-    /// called when an ISB instruction is executed.
-    /// When set to false, ISB will be treated as a NOP instruction.
     pub hook_isb: bool,
-    /// Hint instructions would cause ExceptionRaised to be called with the appropriate
-    /// argument.
     pub hook_hint_instructions: bool,
-    /// This option relates to translation. Generally when we run into an unpredictable
-    /// instruction the ExceptionRaised callback is called. If this is true, we define
-    /// definite behaviour for some unpredictable instructions.
     pub define_unpredictable_behaviour: bool,
-    /// HACK:
-    /// This tells the translator a wall clock will be used, thus allowing it
-    /// to avoid writting certain unnecessary code only needed for cycle timers.
     pub wall_clock_cntpct: bool,
-    /// This allows accurately emulating protection fault handlers. If true, we check
-    /// for exit after every data memory access by the emulated program.
     pub check_halt_on_memory_access: bool,
-    /// This option allows you to disable cycle counting. If this is set to false,
-    /// AddTicks and GetTicksRemaining are never called, and no cycle counting is done.
     pub enable_cycle_counting: bool,
-    /// This option relates to the CPSR.E flag. Enabling this option disables modification
-    /// of CPSR.E by the emulated program, forcing it to 0.
-    /// NOTE: Calling Jit::SetCpsr with CPSR.E=1 while this option is enabled may result
-    ///      in unusual behavior.
     pub always_little_endian: bool,
     pub code_cache_size: usize,
-    /// Internal use only
     pub very_verbose_debugging_output: bool,
 }
 
@@ -250,9 +230,10 @@ pub struct Dynarmic<T: Callbacks> {
 
 impl<T: Callbacks> Drop for Dynarmic<T> {
     fn drop(&mut self) {
-        unsafe {
-            crate::cxx::delete_a32_jit(self.ptr)
+        unsafe extern "C-unwind" {
+            pub fn delete_a32_jit(ptr: *mut Jit);
         }
+        unsafe { delete_a32_jit(self.ptr) }
     }
 }
 
@@ -302,9 +283,9 @@ impl<T: Callbacks> Dynarmic<T> {
         get_ticks_remaining: T::get_ticks_remaining,
     };
     
-    #[inline]
-    pub fn new(cb: T) -> Config<T> {
-        Config::new(cb)
+    #[inline(always)]
+    pub fn new_config() -> Config<T> {
+        Config::new()
     }
 
     /// Runs the emulated CPU.
@@ -373,7 +354,7 @@ impl<T: Callbacks> Dynarmic<T> {
 
     /// Clears a halt reason from flags.
     #[inline]
-    pub unsafe fn clear_halt(&mut self, hr: crate::HaltReason) {
+    pub fn clear_halt(&mut self, hr: crate::HaltReason) {
         unsafe extern "C-unwind" {
             pub fn JitA32_ClearHalt(this: *mut Jit, hr: crate::HaltReason);
         }
@@ -525,12 +506,17 @@ impl<T: Callbacks> DerefMut for Dynarmic<T> {
 }
 
 pub struct Config<T: Callbacks> {
-    config: DynarmicConfig<T>,
-    cb: Box<T>
+    config: DynarmicConfig<T>
+}
+
+impl<T: Callbacks> Default for Config<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: Callbacks> Config<T> {
-    pub fn new(cb: T) -> Self {
+    pub fn new() -> Self {
         Self { config: DynarmicConfig {
             callbacks: unsafe { std::mem::zeroed() },
             processor_id: 0,
@@ -557,18 +543,19 @@ impl<T: Callbacks> Config<T> {
             always_little_endian: false,
             code_cache_size: 128 * 1024 * 1024,
             very_verbose_debugging_output: false,
-        }, cb: Box::new(cb) }
+        } }
     }
-    pub fn build(self) -> Dynarmic<T> {
+    pub fn init(&mut self, cb: T) -> Dynarmic<T> {
+        let mut cb = Box::new(cb);
         let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
             vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ()).byte_add(crate::cxx::VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
-            ptr: self.cb.as_ref() as *const _ as *mut _,
+            ptr: cb.as_mut(),
         });
 
         Dynarmic {
-            ptr: unsafe { &mut *crate::cxx::new_a32_jit_t(self.config, cpp_cb.as_mut()) },
+            ptr: unsafe { &mut *crate::cxx::new_a32_jit_t(&mut self.config, cpp_cb.as_mut()) },
             cpp_cb,
-            rust_cb: self.cb,
+            rust_cb: cb,
         }
     }
 
@@ -650,10 +637,10 @@ impl<T: Callbacks> Config<T> {
     /// Enable/disable hooks for `ISB` and hint instructions.
     /// 
     /// - `isb` - when enabled, [instruction_synchronization_barrier_raised](Callbacks::instruction_synchronization_barrier_raised)
-    ///  will be called, otherwise it is treated as a NOP
+    ///   will be called, otherwise it is treated as a NOP
     /// - `hint` - when enabled, [raised_exception](Callbacks::raised_exception) will be 
-    ///  called, otherwise it is treated as a NOP. Note that the default implementation 
-    ///  of `exception_raised` is to panic.
+    ///   called, otherwise it is treated as a NOP. Note that the default implementation
+    ///   of `exception_raised` is to panic.
     /// 
     /// By default, both are set to false.
     pub fn enable_hooks(&mut self, isb: bool, hint: bool) {

@@ -2,7 +2,6 @@ pub(crate) mod cxx;
 pub mod a32;
 pub mod a64;
 
-pub use cxx::{CxxOptional, CxxVector, CxxSharedPtr};
 pub use a32::Dynarmic as DynarmicA32;
 pub use a64::Dynarmic as DynarmicA64;
 
@@ -116,15 +115,20 @@ pub enum HaltReason {
     UserDefined8 = 2147483648,
 }
 
-#[repr(C)]
-pub struct ExclusiveMonitor {
-    spinlock: i32,
-    exclusive_addr: CxxVector<a64::VAddr>,
-    exclusive_val: CxxVector<u128>
+#[repr(transparent)]
+struct Spinlock {
+    storage: i32
 }
 
-// todo: can we implement ReadAndMark and DoExclusiveOperation?
+#[repr(C)]
+pub struct ExclusiveMonitor {
+    spinlock: Spinlock,
+    exclusive_addr: cxx::CxxVector<a64::VAddr>,
+    exclusive_val: cxx::CxxVector<u128>,
+}
+
 impl ExclusiveMonitor {
+    #[inline(always)]
     pub fn new(processor_count: usize) -> Self {
         unsafe extern "C-unwind" {
             fn ExclusiveMonitor_ExclusiveMonitor(
@@ -138,25 +142,122 @@ impl ExclusiveMonitor {
             init.assume_init()
         }
     }
+
+    #[inline]
     pub fn clear_processor(&mut self, id: usize) {
-        unsafe extern "C-unwind" {
-            pub fn ExclusiveMonitor_ClearProcessor(
-                this: &mut ExclusiveMonitor,
-                processor_id: usize,
-            );
+        unsafe {
+            *self.get_addr_ptr(id) = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
         }
-        unsafe { ExclusiveMonitor_ClearProcessor(self, id) }
     }
     pub fn clear(&mut self) {
-        unsafe extern "C-unwind" {
-            pub fn ExclusiveMonitor_Clear(this: &mut ExclusiveMonitor);
+        for i in 0..self.get_processor_count() {
+            self.clear_processor(i)
         }
-        unsafe { ExclusiveMonitor_Clear(self) }
     }
-    pub fn get_processor_count(&mut self) -> usize {
+
+    #[inline(always)]
+    pub fn get_processor_count(&self) -> usize {
         unsafe extern "C-unwind" {
-            pub fn ExclusiveMonitor_GetProcessorCount(this: &mut ExclusiveMonitor) -> usize;
+            fn size_vec_u64(vec: *const cxx::CxxVector<u64>) -> usize;
         }
-        unsafe { ExclusiveMonitor_GetProcessorCount(self) }
+        unsafe { size_vec_u64(&self.exclusive_addr) }
+    }
+
+    #[inline(always)]
+    fn get_addr_ptr(&mut self, proc: usize) -> *mut u64 {
+        debug_assert!(proc < self.get_processor_count());
+        unsafe extern "C-unwind" {
+            fn get_vec_u64(vec: *mut cxx::CxxVector<u64>, index: usize) -> *mut u64;
+        }
+        unsafe { get_vec_u64(&mut self.exclusive_addr, proc) }
+    }
+    #[inline(always)]
+    fn get_value_ptr(&mut self, proc: usize) -> *mut u128 {
+        debug_assert!(proc < self.get_processor_count());
+        unsafe extern "C-unwind" {
+            fn get_vec_u128(vec: *mut cxx::CxxVector<u64>, index: usize) -> *mut u128;
+        }
+        unsafe { get_vec_u128(&mut self.exclusive_addr, proc) }
+    }
+    #[inline(always)]
+    fn lock(&mut self) {
+        unsafe extern "C-unwind" {
+            pub fn SpinLock_Lock(this: *mut Spinlock);
+        }
+        unsafe { SpinLock_Lock(&mut self.spinlock) }
+    }
+    #[inline(always)]
+    fn unlock(&mut self) {
+        unsafe extern "C-unwind" {
+            pub fn SpinLock_Unlock(this: *mut Spinlock);
+        }
+        unsafe { SpinLock_Unlock(&mut self.spinlock) }
+    }
+
+    /// Marks a region containing [`address`, `address`+size) to be exclusive to
+    /// processor `proc_id`.
+    pub fn read_and_mark<T: GuestInt, F>(&mut self, proc_id: usize, addr: a64::VAddr, op: F)
+        where F: Fn() -> T {
+
+        self.lock();
+
+        let val = op();
+        // safety: pointer validity should be ensured by C++
+        unsafe {
+            *self.get_addr_ptr(proc_id) = addr;
+            // note that we use copy here as the original code specifically chooses
+            // not to zero out the other bytes and i'm not really sure if that's on purpose
+            // safety: .cast() is safe as T can't be bigger than u128
+            std::ptr::copy_nonoverlapping(&val, self.get_value_ptr(proc_id).cast(), 1);
+        }
+        self.unlock();
+    }
+
+    /// Checks to see if processor `proc_id` has exclusive access to the
+    /// specified region. If it does, executes the operation then clears
+    /// the exclusive state for processors if their exclusive region(s)
+    /// contain [`addr`, `addr`+size).
+    pub fn do_exclusive_op<T: GuestInt, F>(&mut self, proc_id: usize, addr: a64::VAddr, op: F) -> bool
+    where F: Fn(T) -> bool {
+
+        // CheckAndClear (private function)
+        self.lock();
+        if unsafe { *self.get_addr_ptr(proc_id) } != addr {
+            self.unlock();
+            return false;
+        }
+
+        for i in 0..self.get_processor_count() {
+            let val = self.get_addr_ptr(i);
+            unsafe {
+                if *val == addr {
+                    *val = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
+                }
+            }
+        }
+
+        // DoExclusiveOperation
+        let saved_value = unsafe { *self.get_value_ptr(proc_id).cast::<T>() };
+        let result = op(saved_value);
+
+        self.unlock();
+        result
+    }
+}
+
+impl Drop for ExclusiveMonitor {
+    fn drop(&mut self) {
+        unsafe extern "C-unwind" {
+            pub fn delete_vec_u64(
+                vec: *mut cxx::CxxVector<u64>,
+            );
+            pub fn delete_vec_u128(
+                vec: *mut cxx::CxxVector<u128>,
+            );
+        }
+        unsafe {
+            delete_vec_u64(&mut self.exclusive_addr);
+            delete_vec_u128(&mut self.exclusive_val);
+        }
     }
 }

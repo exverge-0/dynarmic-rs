@@ -12,6 +12,7 @@ static_assert(sizeof(Dynarmic::A32::UserConfig) == 368, "Failed to verify size o
 static_assert(sizeof(Dynarmic::A64::UserConfig) == 144, "Failed to verify size of type A64::UserConfig");
 static_assert(sizeof(std::shared_ptr<Dynarmic::A32::Coprocessor>) == 16, "Failed to verify size of type std::shared_ptr");
 static_assert(sizeof(Dynarmic::ExclusiveMonitor) == 56, "Failed to verify size of type ExclusiveMonitor");
+static_assert(sizeof(Dynarmic::SpinLock) == sizeof(std::int32_t), "Failed to verify size of type SpinLock");
 
 Dynarmic::HaltReason JitA32_Run(Dynarmic::A32::Jit* jit) {
     return jit->Run();
@@ -152,12 +153,28 @@ void ExclusiveMonitor_Clear(Dynarmic::ExclusiveMonitor* self) {
 size_t ExclusiveMonitor_GetProcessorCount(Dynarmic::ExclusiveMonitor* self) {
     return self->GetProcessorCount();
 }
+void SpinLock_Lock(Dynarmic::SpinLock* lock) {
+    lock->Lock();
+}
+void SpinLock_Unlock(Dynarmic::SpinLock* lock) {
+    lock->Unlock();
+}
 
-void destroy_vec_u64(std::vector<std::uint64_t>* vec) {
+std::uint64_t* get_vec_u64(std::vector<std::uint64_t>* vec, size_t index) {
+    return &(*vec)[index];
+}
+size_t size_vec_u64(std::vector<std::uint64_t>* vec) {
+    return vec->size();
+}
+std::uint64_t* get_vec_u128(std::vector<std::array<std::uint64_t, 2>>* vec, size_t index) {
+    return (*vec)[index].data();
+}
+
+void delete_vec_u64(std::vector<std::uint64_t>* vec) {
     vec->~vector();
 }
 
-void destroy_vec_u128(std::vector<Dynarmic::Vector>* vec) {
+void delete_vec_u128(std::vector<Dynarmic::Vector>* vec) {
     vec->~vector();
 }
 

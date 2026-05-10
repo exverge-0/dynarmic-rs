@@ -73,7 +73,7 @@ mod a32 {
             env.code_mem.push(0xeafffffe); // B .
             env.ticks_left = 2;
 
-            let mut jit = DynarmicA32::new(env).build();
+            let mut jit = DynarmicA32::new_config().init(env);
 
             jit.set_reg(0, 0);
             jit.set_reg(1, 1);
@@ -170,7 +170,7 @@ mod a64 {
         env.code_mem.push(0x14000000); // B .
         env.ticks_left = 2;
 
-        let mut jit = DynarmicA64::new(env).build();
+        let mut jit = DynarmicA64::new_config().init(env);
 
         jit.set_reg(0, 0);
         jit.set_reg(1, 1);

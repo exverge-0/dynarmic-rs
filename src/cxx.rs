@@ -1,50 +1,10 @@
 use std::mem::MaybeUninit;
 
-/// Rust struct representing C++ `std::vector<T, Allocator>`.
-/// This type cannot be constructed in Rust.
-/// # Safety
-/// - This type is used solely with Dynarmic's functions, and cannot be used to hold any type other than [u128], [u64].
-/// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate (e.g. `cxx` crate).
-/// - Though the public interface is generally constant, C++ vectors are implementation specific and unsafe to interact with in Rust.
-#[allow(private_bounds)]
 #[repr(C)]
-pub struct CxxVector<T: CppVectorElement> {
+pub struct CxxVector<T: Sized> {
     __data: [*mut T; 3],
 }
 
-trait CppVectorElement: Sized {
-    /// Reserved for use by [dynarmic] crate. Do not use.
-    unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>);
-}
-impl CppVectorElement for u64 {
-    unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
-        unsafe {
-            destroy_vec_u64(vec);
-        }
-    }
-}
-impl CppVectorElement for u128 {
-    unsafe fn __cpp_vector_drop(vec: &mut CxxVector<Self>) {
-        unsafe {
-            destroy_vec_u128(vec);
-        }
-    }
-}
-
-impl<T: CppVectorElement> Drop for CxxVector<T> {
-    fn drop(&mut self) {
-        unsafe {
-            T::__cpp_vector_drop(self);
-        }
-    }
-}
-
-/// Rust struct representing C++ `std::optional<T>`.
-/// This type can be constructed from [usize], [u64], or [u32] using [From].
-/// # Safety
-/// - The size of this type optional<T> is only confirmed to match C++ with T is [usize], [u64], or [u32]. Certain implementations may differ in size/alignment for other types.
-/// - This type **will not** run [Drop] (or its C++ destructor) for its T types and should not be used for other types.
-/// - This type may be used with [std::mem::transmute] to convert to/from another `std::optional<T>` FFI type of another crate.
 #[repr(C)]
 pub struct CxxOptional<T: Sized> {
     __data: MaybeUninit<T>,
@@ -81,11 +41,6 @@ impl From<u32> for CxxOptional<u32> {
     }
 }
 
-/// Rust struct representing C++ `std::shared_ptr<T>`.
-/// This type only supports construction with [crate::a32::Coprocessor] in Rust, though in theory it should work with any type.
-/// # Safety
-/// - This type **will not** run [Drop] (or its C++ destructor) for its T value. This implementation assumes that dynarmic will drop shared_ptr<T>, and dropping in Rust will not release the underlying pointer, potentially causing memory leaks.
-/// - This type may be used with [std::mem::transmute] to convert to/from another `std::shared_ptr<T>` FFI type of another crate.
 #[repr(C)]
 pub struct CxxSharedPtr<T: Sized> {
     __data: *mut MaybeUninit<T>,
@@ -113,17 +68,10 @@ impl Default for CxxSharedPtr<crate::a32::Coprocessor> {
 
 pub use bindings::*;
 mod bindings {
-    use crate::cxx::{CxxOptional, CxxSharedPtr, CxxVector};
+    use crate::cxx::{CxxOptional, CxxSharedPtr};
     use crate::CallbackRef;
 
     unsafe extern "C-unwind" {
-        pub fn destroy_vec_u64(
-            vec: *mut CxxVector<u64>,
-        );
-        pub fn destroy_vec_u128(
-            vec: *mut CxxVector<u128>,
-        );
-        
         pub fn new_optional_usize(
             out: *mut CxxOptional<usize>,
             s: usize,
@@ -138,25 +86,24 @@ mod bindings {
         );
         
         pub fn new_a32_jit(conf: *mut crate::a32::DynarmicConfig<u8>) -> *mut crate::a32::Jit;
-        pub fn delete_a32_jit(ptr: *mut crate::a32::Jit);
         
-        pub fn new_a64_jit(conf: *mut crate::a64::DynarmicConfig<u8>, ) -> *mut crate::a64::Jit;
+        pub fn new_a64_jit(conf: *mut crate::a64::DynarmicConfig<u8>) -> *mut crate::a64::Jit;
         pub fn delete_a64_jit(ptr: *mut crate::a64::Jit);
     }
     #[inline(always)]
-    pub unsafe fn new_a32_jit_t<T>(mut conf: crate::a32::DynarmicConfig<T>, cb: &mut CallbackRef<T>) -> *mut crate::a32::Jit {
+    pub unsafe fn new_a32_jit_t<T>(conf: &mut crate::a32::DynarmicConfig<T>, cb: &mut CallbackRef<T>) -> *mut crate::a32::Jit {
         unsafe {
             conf.callbacks = cb as *mut _;
 
-            new_a32_jit((&mut conf as *mut crate::a32::DynarmicConfig<T>).cast())
+            new_a32_jit((conf as *mut crate::a32::DynarmicConfig<T>).cast())
         }
     }
     #[inline(always)]
-    pub unsafe fn new_a64_jit_t<T>(mut conf: crate::a64::DynarmicConfig<T>, cb: &mut CallbackRef<T>) -> *mut crate::a64::Jit {
+    pub unsafe fn new_a64_jit_t<T>(conf: &mut crate::a64::DynarmicConfig<T>, cb: &mut CallbackRef<T>) -> *mut crate::a64::Jit {
         unsafe {
             conf.callbacks = cb as *mut _;
 
-            new_a64_jit((&mut conf as *mut crate::a64::DynarmicConfig<T>).cast())
+            new_a64_jit((conf as *mut crate::a64::DynarmicConfig<T>).cast())
         }
     }
 }

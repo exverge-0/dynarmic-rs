@@ -77,12 +77,10 @@ mod a32 {
             let mut env = ArmFastmemTestEnv::new(ptr);
             env.ticks_left = 3;
 
-            let mut config = DynarmicA32::new(env);
-
-            config.fastmem(ptr.cast(), false)
-                .processor_id(0);
-
-            let mut jit = config.build();
+            let mut jit = DynarmicA32::new_config()
+                .fastmem(ptr.cast(), false)
+                .processor_id(0)
+                .init(env);
 
             std::ptr::copy_nonoverlapping(
                 std::ffi::CString::new("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")
@@ -192,11 +190,11 @@ mod a64 {
 
             let mut env = A64FastmemTestEnv::new(ptr);
             env.ticks_left = 5;
-            let mut config = DynarmicA64::new(env);
-            config.fastmem(ptr as *mut _, address_width, false, true)
-                .processor_id(0);
-
-            let mut jit = config.build();
+            let mut jit = DynarmicA64::new_config()
+                .fastmem(ptr as *mut _, address_width, false, true)
+                .processor_id(0)
+                .init(env);
+            
             std::ptr::copy_nonoverlapping(
                 std::ffi::CString::new("Lorem ipsum dolor sit amet, consectetur adipiscing elit.")
                     .unwrap()

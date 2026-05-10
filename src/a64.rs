@@ -1,4 +1,4 @@
-use crate::{CallbackRef, CxxOptional, GuestInt, OptimizationFlag};
+use crate::{CallbackRef, GuestInt, OptimizationFlag};
 use std::ops::{Deref, DerefMut};
 pub type VAddr = u64;
 
@@ -17,9 +17,9 @@ pub struct DynarmicCallbacks<T> {
 
     // https://github.com/rust-lang/rust/issues/38258
     #[cfg(not(target_env = "msvc"))]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, VAddr) -> CxxOptional<u32>,
+    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, VAddr) -> crate::cxx::CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut CxxOptional<u32>, VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut crate::cxx::CxxOptional<u32>, VAddr),
 
     pub memory_read_8: extern "C" fn(&CallbackRef<T>, VAddr) -> u8,
     pub memory_read_16: extern "C" fn(&CallbackRef<T>, VAddr) -> u16,
@@ -71,7 +71,7 @@ pub struct DynarmicConfig<T> {
     pub absolute_offset_page_table: bool,
     pub detect_misaligned_access_via_page_table: u8,
     pub only_detect_misalignment_via_page_table_on_page_boundary: bool,
-    pub fastmem_pointer: CxxOptional<usize>,
+    pub fastmem_pointer: crate::cxx::CxxOptional<usize>,
     pub recompile_on_fastmem_failure: bool,
     pub fastmem_address_space_bits: usize,
     pub silently_mirror_fastmem: bool,
@@ -204,15 +204,16 @@ pub struct Dynarmic<T: Callbacks> {
 
 impl<T: Callbacks> Drop for Dynarmic<T> {
     fn drop(&mut self) {
-        unsafe {
-            crate::cxx::delete_a64_jit(self.ptr)
+        unsafe extern "C-unwind" {
+            pub fn delete_a64_jit(ptr: *mut Jit);
         }
+        unsafe { delete_a64_jit(self.ptr) }
     }
 }
 
 impl<T: Callbacks> Dynarmic<T> {
     #[cfg(not(target_env = "msvc"))]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> CxxOptional<u32> {
+    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> crate::cxx::CxxOptional<u32> {
         T::memory_read_code(cb, addr).unwrap_or(0).into()
     }
     #[cfg(target_env = "msvc")]
@@ -258,9 +259,9 @@ impl<T: Callbacks> Dynarmic<T> {
         get_cntpct: T::get_cntpct,
     };
 
-    #[inline]
-    pub fn new(cb: T) -> Config<T> {
-        Config::new(cb)
+    #[inline(always)]
+    pub fn new_config() -> Config<T> {
+        Config::new()
     }
 
     /// Runs the emulated CPU.
@@ -329,7 +330,7 @@ impl<T: Callbacks> Dynarmic<T> {
 
     /// Clears a halt reason from flags.
     #[inline]
-    pub unsafe fn clear_halt(&mut self, hr: crate::HaltReason) {
+    pub fn clear_halt(&mut self, hr: crate::HaltReason) {
         unsafe extern "C-unwind" {
             pub fn JitA64_ClearHalt(this: *mut Jit, hr: crate::HaltReason);
         }
@@ -545,12 +546,17 @@ impl<T: Callbacks> DerefMut for Dynarmic<T> {
 }
 
 pub struct Config<T: Callbacks> {
-    config: DynarmicConfig<T>,
-    cb: Box<T>
+    config: DynarmicConfig<T>
+}
+
+impl<T: Callbacks> Default for Config<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: Callbacks> Config<T> {
-    pub fn new(cb: T) -> Self {
+    pub fn new() -> Self {
         Self { config: DynarmicConfig {
             callbacks: unsafe { std::mem::zeroed() },
             processor_id: 0,
@@ -584,18 +590,19 @@ impl<T: Callbacks> Config<T> {
             enable_cycle_counting: true,
             code_cache_size: 128 * 1024 * 1024,
             very_verbose_debugging_output: false,
-        }, cb: Box::new(cb) }
+        } }
     }
-    pub fn build(self) -> Dynarmic<T> {
+    pub fn init(&mut self, cb: T) -> Dynarmic<T> {
+        let mut cb = Box::new(cb);
         let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
             vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ()).byte_add(crate::cxx::VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
-            ptr: self.cb.as_ref() as *const _ as *mut _,
+            ptr: cb.as_mut(),
         });
 
         Dynarmic {
-            ptr: unsafe { &mut *crate::cxx::new_a64_jit_t(self.config, cpp_cb.as_mut()) },
+            ptr: unsafe { &mut *crate::cxx::new_a64_jit_t(&mut self.config, cpp_cb.as_mut()) },
             cpp_cb,
-            rust_cb: self.cb,
+            rust_cb: cb,
         }
     }
 
@@ -660,13 +667,13 @@ impl<T: Callbacks> Config<T> {
     /// Enable/disable hooks for `ISB`, data cache instructions, and hint instructions.
     ///
     /// - `isb` - when enabled, [instruction_synchronization_barrier_raised](Callbacks::instruction_synchronization_barrier_raised)
-    ///  will be called, otherwise it is treated as a NOP
-    /// - `hint` - when enabled, [raised_exception](Callbacks::raised_exception) will be 
-    ///  called, otherwise it is treated as a NOP. Note that the default implementation 
-    ///  of `exception_raised` is to panic.
+    ///   will be called, otherwise it is treated as a NOP
+    /// - `hint` - when enabled, [raised_exception](Callbacks::raised_exception) will be
+    ///   called, otherwise it is treated as a NOP. Note that the default implementation
+    ///   of `exception_raised` is to panic.
     /// - `cache_ops` - when enabled, [data_cache_operation_raised](Callbacks::data_cache_operation_raised)
-    ///  will be called when any data cache instruction is executed, otherwise it will 
-    ///  never be called.
+    ///   will be called when any data cache instruction is executed, otherwise it will
+    ///   never be called.
     ///
     /// By default, both are set to false.
     pub fn enable_hooks(&mut self, isb: bool, hint: bool, cache_ops: bool) {
@@ -682,7 +689,7 @@ impl<T: Callbacks> Config<T> {
     }
 
     /// Sets CTR_EL0 value.
-    /// 
+    ///
     /// - Bits `27:24` is log2 of the cache writeback granule in words.
     /// - Bits `23:20` is log2 of the exclusives reservation granule in words.
     /// - Bits `19:16` is log2 of the smallest data/unified cacheline in words.
@@ -693,10 +700,10 @@ impl<T: Callbacks> Config<T> {
     }
 
     /// Sets DCZID_EL0 value.
-    /// 
+    ///
     /// - Bits `3:0` is the log2 of the block size in words
     /// - Bit `4` is 0 if the DC ZVA instruction is permitted.
-    /// 
+    ///
     /// All other bits are unused by dynarmic.
     pub fn dczid_el0(&mut self, val: u32) {
         self.config.ctr_el0 = val;
@@ -717,10 +724,10 @@ impl<T: Callbacks> Config<T> {
 
     /// The page table is used for faster memory access. If an entry in the table is nullptr,
     /// the JIT will fallback to calling the memory_read/memory_write callbacks.
-    /// 
+    ///
     /// `silently_mirror` determines whether Dynarmic should mirror the page table when going
     /// out of its bounds.
-    /// 
+    ///
     /// # Safety
     /// - `table` must be a valid pointer pointing to an array of pointers of size 2^`address_space_bits`.
     /// - `address_space_bits` must be a value between 12 and 64 inclusive.
