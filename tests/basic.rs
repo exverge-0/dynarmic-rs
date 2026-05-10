@@ -72,15 +72,15 @@ mod a32 {
             env.code_mem.push(0xe0810002); // ADD R0, R1, R2
             env.code_mem.push(0xeafffffe); // B .
             env.ticks_left = 2;
-            
+
             let mut jit = DynarmicA32::new(env).build();
 
             jit.set_reg(0, 0);
             jit.set_reg(1, 1);
             jit.set_reg(2, 2);
-            
+
             jit.run();
-            
+
             assert_eq!(jit.get_reg(0), 3);
             assert_eq!(jit.get_reg(1), 1);
             assert_eq!(jit.get_reg(2), 2);
@@ -176,7 +176,7 @@ mod a64 {
         jit.set_reg(1, 1);
         jit.set_reg(2, 2);
 
-        jit.run();
+        unsafe { jit.run(); }
 
         assert_eq!(jit.get_reg(0), 3);
         assert_eq!(jit.get_reg(1), 1);

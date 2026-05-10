@@ -3,8 +3,8 @@ use std::mem::MaybeUninit;
 /// Rust struct representing C++ `std::vector<T, Allocator>`.
 /// This type cannot be constructed in Rust.
 /// # Safety
-/// - This type is used solely with Dynarmic's functions, and cannot be used to hold any type other than [u128], [u64], and [C++ `std::string`](CppString).
-/// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate.
+/// - This type is used solely with Dynarmic's functions, and cannot be used to hold any type other than [u128], [u64].
+/// - This type may be used with [std::mem::transmute] to convert to/from a useable `std::vector<T>` type of another crate (e.g. `cxx` crate).
 /// - Though the public interface is generally constant, C++ vectors are implementation specific and unsafe to interact with in Rust.
 #[allow(private_bounds)]
 #[repr(C)]
@@ -116,7 +116,7 @@ mod bindings {
     use crate::cxx::{CxxOptional, CxxSharedPtr, CxxVector};
     use crate::CallbackRef;
 
-    unsafe extern "C" {
+    unsafe extern "C-unwind" {
         pub fn destroy_vec_u64(
             vec: *mut CxxVector<u64>,
         );
@@ -137,26 +137,26 @@ mod bindings {
             ptr: *const crate::a32::Coprocessor,
         );
         
-        pub fn new_a32_jit(conf: *mut crate::internal::A32Config<u8>) -> *mut crate::a32::Jit;
+        pub fn new_a32_jit(conf: *mut crate::a32::DynarmicConfig<u8>) -> *mut crate::a32::Jit;
         pub fn delete_a32_jit(ptr: *mut crate::a32::Jit);
         
-        pub fn new_a64_jit(conf: *mut crate::internal::A64Config<u8>, ) -> *mut crate::a64::Jit;
+        pub fn new_a64_jit(conf: *mut crate::a64::DynarmicConfig<u8>, ) -> *mut crate::a64::Jit;
         pub fn delete_a64_jit(ptr: *mut crate::a64::Jit);
     }
     #[inline(always)]
-    pub unsafe fn new_a32_jit_t<T>(mut conf: crate::internal::A32Config<T>, cb: &mut CallbackRef<T>) -> *mut crate::a32::Jit {
+    pub unsafe fn new_a32_jit_t<T>(mut conf: crate::a32::DynarmicConfig<T>, cb: &mut CallbackRef<T>) -> *mut crate::a32::Jit {
         unsafe {
             conf.callbacks = cb as *mut _;
 
-            new_a32_jit((&mut conf as *mut crate::internal::A32Config<T>).cast())
+            new_a32_jit((&mut conf as *mut crate::a32::DynarmicConfig<T>).cast())
         }
     }
     #[inline(always)]
-    pub unsafe fn new_a64_jit_t<T>(mut conf: crate::internal::A64Config<T>, cb: &mut CallbackRef<T>) -> *mut crate::a64::Jit {
+    pub unsafe fn new_a64_jit_t<T>(mut conf: crate::a64::DynarmicConfig<T>, cb: &mut CallbackRef<T>) -> *mut crate::a64::Jit {
         unsafe {
             conf.callbacks = cb as *mut _;
 
-            new_a64_jit((&mut conf as *mut crate::internal::A64Config<T>).cast())
+            new_a64_jit((&mut conf as *mut crate::a64::DynarmicConfig<T>).cast())
         }
     }
 }
@@ -175,11 +175,11 @@ const _: () = {
         "Failed to verify size of type std::optional<usize>"
     );
     assert!(
-        size_of::<crate::internal::A32Config<u32>>() == 368,
+        size_of::<crate::a32::DynarmicConfig<u32>>() == 368,
         "Failed to verify size of type a32::UserConfig"
     );
     assert!(
-        size_of::<crate::internal::A64Config<u32>>() == 144,
+        size_of::<crate::a64::DynarmicConfig<u32>>() == 144,
         "Failed to verify size of type a64::UserConfig"
     );
     assert!(
@@ -191,3 +191,21 @@ const _: () = {
         "Failed to verify size of type ExclusiveMonitor"
     );
 };
+
+#[repr(transparent)]
+#[allow(unused)]
+pub struct TypeInfoPtr(*const ());
+unsafe impl Send for TypeInfoPtr {}
+unsafe impl Sync for TypeInfoPtr {}
+
+#[cfg(target_env = "msvc")]
+pub const VTABLE_DIFF: usize = 0;
+
+#[cfg(not(target_env = "msvc"))]
+pub const VTABLE_DIFF: usize = 16;
+
+pub extern "C" fn unimplemented_destructor() {
+    panic!(
+        "Dynarmic attempted to call UserCallbacks destructor; UserCallbacks should ALWAYS be owned by Rust code"
+    )
+}

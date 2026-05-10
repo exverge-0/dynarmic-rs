@@ -1,4 +1,3 @@
-pub(crate) mod internal;
 pub(crate) mod cxx;
 pub mod a32;
 pub mod a64;
@@ -120,14 +119,14 @@ pub enum HaltReason {
 #[repr(C)]
 pub struct ExclusiveMonitor {
     spinlock: i32,
-    exclusive_addr: cxx::CxxVector<a64::VAddr>,
-    exclusive_val: cxx::CxxVector<u128>
+    exclusive_addr: CxxVector<a64::VAddr>,
+    exclusive_val: CxxVector<u128>
 }
 
 // todo: can we implement ReadAndMark and DoExclusiveOperation?
 impl ExclusiveMonitor {
     pub fn new(processor_count: usize) -> Self {
-        unsafe extern "C" {
+        unsafe extern "C-unwind" {
             fn ExclusiveMonitor_ExclusiveMonitor(
                 this: *mut ExclusiveMonitor,
                 processor_count: usize,
@@ -140,7 +139,7 @@ impl ExclusiveMonitor {
         }
     }
     pub fn clear_processor(&mut self, id: usize) {
-        unsafe extern "C" {
+        unsafe extern "C-unwind" {
             pub fn ExclusiveMonitor_ClearProcessor(
                 this: &mut ExclusiveMonitor,
                 processor_id: usize,
@@ -149,13 +148,13 @@ impl ExclusiveMonitor {
         unsafe { ExclusiveMonitor_ClearProcessor(self, id) }
     }
     pub fn clear(&mut self) {
-        unsafe extern "C" {
+        unsafe extern "C-unwind" {
             pub fn ExclusiveMonitor_Clear(this: &mut ExclusiveMonitor);
         }
         unsafe { ExclusiveMonitor_Clear(self) }
     }
     pub fn get_processor_count(&mut self) -> usize {
-        unsafe extern "C" {
+        unsafe extern "C-unwind" {
             pub fn ExclusiveMonitor_GetProcessorCount(this: &mut ExclusiveMonitor) -> usize;
         }
         unsafe { ExclusiveMonitor_GetProcessorCount(self) }
