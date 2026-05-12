@@ -546,14 +546,19 @@ impl<T: Callbacks> Config<T> {
         } }
     }
     pub fn init(&mut self, cb: T) -> Dynarmic<T> {
+        unsafe extern "C-unwind" {
+            pub fn new_a32_jit(conf: *mut DynarmicConfig<u8>) -> *mut Jit;
+        }
+
         let mut cb = Box::new(cb);
         let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
             vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ()).byte_add(crate::cxx::VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
             ptr: cb.as_mut(),
         });
+        self.config.callbacks = cpp_cb.as_mut();
 
         Dynarmic {
-            ptr: unsafe { &mut *crate::cxx::new_a32_jit_t(&mut self.config, cpp_cb.as_mut()) },
+            ptr: unsafe { new_a32_jit((&mut self.config as *mut DynarmicConfig<T>).cast()) }, // safety: we're casting T, which has no effect on memory layout
             cpp_cb,
             rust_cb: cb,
         }

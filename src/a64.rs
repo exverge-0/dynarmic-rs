@@ -1,4 +1,5 @@
 use crate::{CallbackRef, GuestInt, OptimizationFlag};
+use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
 pub type VAddr = u64;
 
@@ -196,13 +197,15 @@ pub type Jit = u64;
 /// A Rust-safe wrapper of Dynarmic's A64 Jit.
 /// This type can be constructed with [Config].
 #[allow(dead_code)]
-pub struct Dynarmic<T: Callbacks> {
+pub struct Dynarmic<'a, T: Callbacks> {
     ptr: *mut Jit,
     cpp_cb: Box<CallbackRef<T>>,
     rust_cb: Box<T>,
+    tpidr_el0: Option<&'a RefCell<u64>>, // todo: maybe just own it and give rw access through Dynarmic type?
+    tpidrro_el0: Option<&'a RefCell<u64>>,
 }
 
-impl<T: Callbacks> Drop for Dynarmic<T> {
+impl<'a, T: Callbacks> Drop for Dynarmic<'a, T> {
     fn drop(&mut self) {
         unsafe extern "C-unwind" {
             pub fn delete_a64_jit(ptr: *mut Jit);
@@ -211,13 +214,13 @@ impl<T: Callbacks> Drop for Dynarmic<T> {
     }
 }
 
-impl<T: Callbacks> Dynarmic<T> {
+impl<'a, T: Callbacks> Dynarmic<'a, T> {
     #[cfg(not(target_env = "msvc"))]
     unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> crate::cxx::CxxOptional<u32> {
         T::memory_read_code(cb, addr).unwrap_or(0).into()
     }
     #[cfg(target_env = "msvc")]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, out: *mut CxxOptional<u32>, addr: VAddr) {
+    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, out: *mut crate::cxx::CxxOptional<u32>, addr: VAddr) {
         unsafe {
             *out = T::memory_read_code(cb, addr).unwrap_or(0).into();
         }
@@ -260,7 +263,7 @@ impl<T: Callbacks> Dynarmic<T> {
     };
 
     #[inline(always)]
-    pub fn new_config() -> Config<T> {
+    pub fn new_config() -> Config<'a, T> {
         Config::new()
     }
 
@@ -531,7 +534,7 @@ impl<T: Callbacks> Dynarmic<T> {
     }
 }
 
-impl<T: Callbacks> Deref for Dynarmic<T> {
+impl<'a, T: Callbacks> Deref for Dynarmic<'a, T> {
     type Target = CallbackRef<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -539,29 +542,31 @@ impl<T: Callbacks> Deref for Dynarmic<T> {
     }
 }
 
-impl<T: Callbacks> DerefMut for Dynarmic<T> {
+impl<'a, T: Callbacks> DerefMut for Dynarmic<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cpp_cb.as_mut()
     }
 }
 
-pub struct Config<T: Callbacks> {
-    config: DynarmicConfig<T>
+pub struct Config<'a, T: Callbacks> {
+    config: DynarmicConfig<T>,
+    tpidr_el0: Option<&'a RefCell<u64>>,
+    tpidrro_el0: Option<&'a RefCell<u64>>,
 }
 
-impl<T: Callbacks> Default for Config<T> {
+impl<'a, T: Callbacks> Default for Config<'a, T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Callbacks> Config<T> {
+impl<'a, T: Callbacks> Config<'a, T> {
     pub fn new() -> Self {
         Self { config: DynarmicConfig {
             callbacks: unsafe { std::mem::zeroed() },
             processor_id: 0,
             global_monitor: unsafe { std::mem::zeroed() }, // todo
-            optimizations: crate::OptimizationFlag::ALL,
+            optimizations: OptimizationFlag::ALL,
             unsafe_optimizations: false,
             hook_data_cache_operations: false,
             hook_isb: false,
@@ -590,19 +595,32 @@ impl<T: Callbacks> Config<T> {
             enable_cycle_counting: true,
             code_cache_size: 128 * 1024 * 1024,
             very_verbose_debugging_output: false,
-        } }
+        }, tpidr_el0: None, tpidrro_el0: None, }
     }
-    pub fn init(&mut self, cb: T) -> Dynarmic<T> {
+    pub fn init(&mut self, cb: T) -> Dynarmic<'a, T> {
+        unsafe extern "C-unwind" {
+            pub fn new_a64_jit(conf: *mut DynarmicConfig<u8>) -> *mut Jit;
+        }
         let mut cb = Box::new(cb);
         let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
             vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ()).byte_add(crate::cxx::VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
             ptr: cb.as_mut(),
         });
 
+        self.config.callbacks = cpp_cb.as_mut();
+        if self.tpidr_el0.is_some() {
+            self.config.tpidr_el0 = self.tpidr_el0.unwrap().as_ptr()
+        }
+        if self.tpidrro_el0.is_some() {
+            self.config.tpidrro_el0 = self.tpidrro_el0.unwrap().as_ptr()
+        }
+
         Dynarmic {
-            ptr: unsafe { &mut *crate::cxx::new_a64_jit_t(&mut self.config, cpp_cb.as_mut()) },
+            ptr: unsafe { &mut *new_a64_jit((&mut self.config as *mut DynarmicConfig<T>).cast()) }, // safety: we're casting T, which has no effect on memory layout
             cpp_cb,
             rust_cb: cb,
+            tpidr_el0: self.tpidr_el0,
+            tpidrro_el0: self.tpidrro_el0,
         }
     }
 
@@ -640,9 +658,11 @@ impl<T: Callbacks> Config<T> {
     ///
     /// On x64, dynarmic currently relies on x64 cmpxchg semantics which may not provide
     /// fully accurate emulation.
-    pub fn fastmem_exclusive(&mut self, exclusive_access: bool, recompile_on_fault: bool) {
+    pub fn fastmem_exclusive(&mut self, exclusive_access: bool, recompile_on_fault: bool) -> &mut Self {
         self.config.fastmem_exclusive_access = exclusive_access;
         self.config.recompile_on_exclusive_fastmem_failure = recompile_on_fault;
+
+        self
     }
 
     /// This selects other optimizations than can't otherwise be disabled by setting other
@@ -652,16 +672,20 @@ impl<T: Callbacks> Config<T> {
     /// - RSB optimizations
     ///
     /// This is intended to be used for debugging.
-    pub fn optimizations(&mut self, optimization_flag: OptimizationFlag) {
+    pub fn optimizations(&mut self, optimization_flag: OptimizationFlag) -> &mut Self {
         self.config.optimizations = optimization_flag;
+
+        self
     }
 
     /// This enables unsafe optimizations that reduce emulation accuracy in favour of speed.
     /// For safety, in order to enable unsafe optimizations you have to set BOTH this flag
     /// AND the appropriate flag bits above.
     /// The prefered and tested mode for dynarmic is with unsafe optimizations disabled.
-    pub fn unsafe_optimization(&mut self, enable: bool) {
+    pub fn unsafe_optimization(&mut self, enable: bool) -> &mut Self {
         self.config.unsafe_optimizations = enable;
+
+        self
     }
 
     /// Enable/disable hooks for `ISB`, data cache instructions, and hint instructions.
@@ -676,16 +700,20 @@ impl<T: Callbacks> Config<T> {
     ///   never be called.
     ///
     /// By default, both are set to false.
-    pub fn enable_hooks(&mut self, isb: bool, hint: bool, cache_ops: bool) {
+    pub fn enable_hooks(&mut self, isb: bool, hint: bool, cache_ops: bool) -> &mut Self {
         self.config.hook_isb = isb;
         self.config.hook_hint_instructions = hint;
         self.config.hook_data_cache_operations = cache_ops;
+
+        self
     }
 
     /// Counter-timer frequency register. The value of the register is not interpreted by
     /// dynarmic.
-    pub fn cntfrq_el0(&mut self, val: u32) {
+    pub fn cntfrq_el0(&mut self, val: u32) -> &mut Self {
         self.config.cntfrq_el0 = val;
+
+        self
     }
 
     /// Sets CTR_EL0 value.
@@ -695,8 +723,10 @@ impl<T: Callbacks> Config<T> {
     /// - Bits `19:16` is log2 of the smallest data/unified cacheline in words.
     /// - Bits `15:14` is the level 1 instruction cache policy.
     /// - Bits `3:0` is log2 of the smallest instruction cacheline in words.
-    pub fn ctr_el0(&mut self, val: u32) {
+    pub fn ctr_el0(&mut self, val: u32) -> &mut Self {
         self.config.ctr_el0 = val;
+
+        self
     }
 
     /// Sets DCZID_EL0 value.
@@ -705,21 +735,25 @@ impl<T: Callbacks> Config<T> {
     /// - Bit `4` is 0 if the DC ZVA instruction is permitted.
     ///
     /// All other bits are unused by dynarmic.
-    pub fn dczid_el0(&mut self, val: u32) {
+    pub fn dczid_el0(&mut self, val: u32) -> &mut Self {
         self.config.ctr_el0 = val;
+
+        self
     }
 
     /// Pointer to where TPIDRRO_EL0 is stored. This pointer will be inserted into
     /// emitted code.
-    // todo: use lifetime requirement instead of unsafe fn
-    pub unsafe fn tpidrro_el0(&mut self, val: *mut u64) {
-        self.config.tpidrro_el0 = val;
+    pub fn tpidrro_el0(&mut self, val: &'a RefCell<u64>) -> &mut Self {
+        self.tpidrro_el0 = Some(val);
+
+        self
     }
     /// Pointer to where TPIDR_EL0 is stored. This pointer will be inserted into
     /// emitted code.
-    // todo: use lifetime requirement instead of unsafe fn
-    pub unsafe fn tpidr_el0(&mut self, val: *mut u64) {
-        self.config.tpidr_el0 = val;
+    pub fn tpidr_el0(&mut self, val: &'a RefCell<u64>) -> &mut Self {
+        self.tpidr_el0 = Some(val);
+
+        self
     }
 
     /// The page table is used for faster memory access. If an entry in the table is nullptr,
@@ -731,31 +765,39 @@ impl<T: Callbacks> Config<T> {
     /// # Safety
     /// - `table` must be a valid pointer pointing to an array of pointers of size 2^`address_space_bits`.
     /// - `address_space_bits` must be a value between 12 and 64 inclusive.
-    pub unsafe fn page_table(&mut self, table: *mut *mut std::ffi::c_void, address_space_bits: usize, silently_mirror: bool) {
+    pub unsafe fn page_table(&mut self, table: *mut *mut std::ffi::c_void, address_space_bits: usize, silently_mirror: bool) -> &mut Self {
         self.config.page_table = table;
         self.config.page_table_address_space_bits = address_space_bits;
         self.config.silently_mirror_page_table = silently_mirror;
+
+        self
     }
 
     /// Masks out the first N bits in host pointers from the page table.
     /// The intention behind this is to allow users of Dynarmic to pack attributes in the
     /// same integer and update the pointer attribute pair atomically.
     /// If the configured value is 3, all pointers will be forcefully aligned to 8 bytes.
-    pub fn page_table_mask(&mut self, mask_bits: i32) {
+    pub fn page_table_mask(&mut self, mask_bits: i32) -> &mut Self {
         self.config.absolute_offset_page_table = false;
         self.config.page_table_pointer_mask_bits = mask_bits;
+
+        self
     }
 
     /// This option allows you to enable/disable cycle counting. If this is set to false,
     /// [add_ticks](Callbacks::add_ticks) and [get_ticks_remaining](Callbacks::get_ticks_remaining) are never called, and no cycle counting is done.
     ///
     /// By default, this is set to true.
-    pub fn cycle_counting(&mut self, enable: bool) {
+    pub fn cycle_counting(&mut self, enable: bool) -> &mut Self {
         self.config.enable_cycle_counting = enable;
+
+        self
     }
 
     /// Sets the size of the recompiled code cache.
-    pub fn code_cache_size(&mut self, size: usize) {
+    pub fn code_cache_size(&mut self, size: usize) -> &mut Self {
         self.config.code_cache_size = size;
+
+        self
     }
 }

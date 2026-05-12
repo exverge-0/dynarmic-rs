@@ -12,7 +12,9 @@ use std::ops::{Deref, DerefMut};
 pub trait GuestInt : num_traits::PrimInt + num_traits::Unsigned {}
 impl<T> GuestInt for T where T: num_traits::PrimInt + num_traits::Unsigned {}
 
-/// Wrapper struct for a mutable reference to a type implementing dynarmic Callbacks.
+/// Wrapper struct for an empty type implementing dynarmic's `Callbacks`.
+///
+/// Dereferences to `T`.
 #[repr(C)]
 pub struct CallbackRef<T> {
     pub(crate) vtable: *const (),
