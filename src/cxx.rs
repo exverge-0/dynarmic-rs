@@ -14,10 +14,7 @@ pub struct CxxOptional<T: Sized> {
 impl From<usize> for CxxOptional<usize> {
     fn from(value: usize) -> Self {
         unsafe extern "C-unwind" {
-            pub fn new_optional_usize(
-                out: *mut CxxOptional<usize>,
-                s: usize,
-            );
+            pub fn new_optional_usize(out: *mut CxxOptional<usize>, s: usize);
         }
         unsafe {
             let mut optional: MaybeUninit<CxxOptional<usize>> = MaybeUninit::uninit();
@@ -30,10 +27,7 @@ impl From<usize> for CxxOptional<usize> {
 impl From<u32> for CxxOptional<u32> {
     fn from(value: u32) -> Self {
         unsafe extern "C-unwind" {
-            pub fn new_optional_u32(
-                out: *mut CxxOptional<u32>,
-                s: u32,
-            );
+            pub fn new_optional_u32(out: *mut CxxOptional<u32>, s: u32);
         }
         unsafe {
             let mut optional: MaybeUninit<CxxOptional<u32>> = MaybeUninit::uninit();

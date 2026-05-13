@@ -1,6 +1,6 @@
-pub(crate) mod cxx;
 pub mod a32;
 pub mod a64;
+pub(crate) mod cxx;
 
 pub use a32::Dynarmic as DynarmicA32;
 pub use a64::Dynarmic as DynarmicA64;
@@ -9,25 +9,25 @@ use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
 /// Integer type used for memory reads and writes.
-pub trait GuestInt : num_traits::PrimInt + num_traits::Unsigned {}
+pub trait GuestInt: num_traits::PrimInt + num_traits::Unsigned {}
 impl<T> GuestInt for T where T: num_traits::PrimInt + num_traits::Unsigned {}
 
 /// Wrapper struct for an empty type implementing dynarmic's `Callbacks`.
 ///
 /// Dereferences to `T`.
 #[repr(C)]
-pub struct CallbackRef<T> {
+pub struct CallbackImpl<T> {
     pub(crate) vtable: *const (),
     pub(crate) ptr: *mut T,
 }
 
-impl<T> CallbackRef<T> {
+impl<T> CallbackImpl<T> {
     const _PTR_ASSERT: () = {
-        assert!(std::mem::offset_of!(CallbackRef<T>, vtable) == 0);
+        assert!(std::mem::offset_of!(CallbackImpl<T>, vtable) == 0);
     };
 }
 
-impl<T> Deref for CallbackRef<T> {
+impl<T> Deref for CallbackImpl<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -35,7 +35,7 @@ impl<T> Deref for CallbackRef<T> {
     }
 }
 
-impl<T> DerefMut for CallbackRef<T> {
+impl<T> DerefMut for CallbackImpl<T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.ptr }
     }
@@ -44,61 +44,59 @@ impl<T> DerefMut for CallbackRef<T> {
 #[repr(transparent)]
 pub struct OptimizationFlag(u32);
 impl OptimizationFlag {
-
     /// This optimization avoids dispatcher lookups by allowing emitted basic blocks to jump
     /// directly to other basic blocks if the destination PC is predictable at JIT-time.
     /// This is a safe optimization.
     pub const BLOCK_LINKING: Self = Self(1);
-    
+
     /// This optimization avoids dispatcher lookups by emulating a return stack buffer. This
     /// allows for function returns and syscall returns to be predicted at runtime.
     /// This is a safe optimization.
-    pub const RETURN_STACK_BUFFER : Self = Self(2);
-    
+    pub const RETURN_STACK_BUFFER: Self = Self(2);
+
     /// This optimization enables a two-tiered dispatch system.
     /// A fast dispatcher (written in assembly) first does a look-up in a small MRU cache.
     /// If this fails, it falls back to the usual slower dispatcher.
     /// This is a safe optimization.
-    pub const FAST_DISPATCH : Self = Self(4);
-    
+    pub const FAST_DISPATCH: Self = Self(4);
+
     /// This is an IR optimization. This optimization eliminates unnecessary emulated CPU state
     /// context lookups.
     /// This is a safe optimization.
-    pub const GET_SET_ELIMINATION : Self = Self(8);
-    
+    pub const GET_SET_ELIMINATION: Self = Self(8);
+
     /// This is an IR optimization. This optimization does constant propagation.
     /// This is a safe optimization.
-    pub const CONST_PROP : Self = Self(16);
-    
+    pub const CONST_PROP: Self = Self(16);
+
     /// This is enables miscellaneous safe IR optimizations.
-    pub const MISC_IR_OPT : Self = Self(32);
-    
+    pub const MISC_IR_OPT: Self = Self(32);
+
     /// This is an UNSAFE optimization that reduces accuracy of fused multiply-add operations.
     /// This unfuses fused instructions to improve performance on host CPUs without FMA support.
-    pub const UNSAFE_UNFUSE_FMA : Self = Self(65536);
-    
+    pub const UNSAFE_UNFUSE_FMA: Self = Self(65536);
+
     /// This is an UNSAFE optimization that reduces accuracy of certain floating-point instructions.
     /// This allows results of FRECPE and FRSQRTE to have **less** error than spec allows.
-    pub const UNSAFE_REDUCED_ERROR_FP : Self = Self(131072);
-    
+    pub const UNSAFE_REDUCED_ERROR_FP: Self = Self(131072);
+
     /// This is an UNSAFE optimization that causes floating-point instructions to not produce correct NaNs.
     /// This may also result in inaccurate results when instructions are given certain special values.
-    pub const UNSAFE_INACCURATENAN : Self = Self(262144);
-    
+    pub const UNSAFE_INACCURATENAN: Self = Self(262144);
+
     /// This is an UNSAFE optimization that causes ASIMD floating-point instructions to be run with incorrect
     /// rounding modes. This may result in inaccurate results with all floating-point ASIMD instructions.
-    pub const UNSAFE_IGNORE_STANDARD_FPCR_VALUE : Self = Self(524288);
-    
+    pub const UNSAFE_IGNORE_STANDARD_FPCR_VALUE: Self = Self(524288);
+
     /// This is an UNSAFE optimization that causes the global monitor to be ignored. This may
     /// result in unexpected behaviour in multithreaded scenarios, including but not limited
     /// to data races and deadlocks.
-    pub const UNSAFE_IGNORE_GLOBALMONITOR : Self = Self(1048576);
-    
+    pub const UNSAFE_IGNORE_GLOBALMONITOR: Self = Self(1048576);
 
-    /// All safe optimizations. 
+    /// All safe optimizations.
     /// The default used by dynarmic.
-    pub const ALL : Self = Self(0x0000FFFF);
-    pub const NONE : Self = Self(0);
+    pub const ALL: Self = Self(0x0000FFFF);
+    pub const NONE: Self = Self(0);
 }
 
 #[repr(u32)]
@@ -119,7 +117,7 @@ pub enum HaltReason {
 
 #[repr(transparent)]
 struct Spinlock {
-    storage: i32
+    storage: i32,
 }
 
 #[repr(C)]
@@ -199,8 +197,9 @@ impl ExclusiveMonitor {
     /// Marks a region containing [`address`, `address`+size) to be exclusive to
     /// processor `proc_id`.
     pub fn read_and_mark<T: GuestInt, F>(&mut self, proc_id: usize, addr: a64::VAddr, op: F)
-        where F: Fn() -> T {
-
+    where
+        F: Fn() -> T,
+    {
         self.lock();
 
         let val = op();
@@ -219,9 +218,15 @@ impl ExclusiveMonitor {
     /// specified region. If it does, executes the operation then clears
     /// the exclusive state for processors if their exclusive region(s)
     /// contain [`addr`, `addr`+size).
-    pub fn do_exclusive_op<T: GuestInt, F>(&mut self, proc_id: usize, addr: a64::VAddr, op: F) -> bool
-    where F: Fn(T) -> bool {
-
+    pub fn do_exclusive_op<T: GuestInt, F>(
+        &mut self,
+        proc_id: usize,
+        addr: a64::VAddr,
+        op: F,
+    ) -> bool
+    where
+        F: Fn(T) -> bool,
+    {
         // CheckAndClear (private function)
         self.lock();
         if unsafe { *self.get_addr_ptr(proc_id) } != addr {
@@ -250,12 +255,8 @@ impl ExclusiveMonitor {
 impl Drop for ExclusiveMonitor {
     fn drop(&mut self) {
         unsafe extern "C-unwind" {
-            pub fn delete_vec_u64(
-                vec: *mut cxx::CxxVector<u64>,
-            );
-            pub fn delete_vec_u128(
-                vec: *mut cxx::CxxVector<u128>,
-            );
+            pub fn delete_vec_u64(vec: *mut cxx::CxxVector<u64>);
+            pub fn delete_vec_u128(vec: *mut cxx::CxxVector<u128>);
         }
         unsafe {
             delete_vec_u64(&mut self.exclusive_addr);

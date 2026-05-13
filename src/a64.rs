@@ -1,5 +1,5 @@
-use crate::{CallbackRef, GuestInt, OptimizationFlag};
-use std::cell::RefCell;
+use crate::{CallbackImpl, GuestInt, OptimizationFlag};
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 pub type VAddr = u64;
 
@@ -18,41 +18,44 @@ pub struct DynarmicCallbacks<T> {
 
     // https://github.com/rust-lang/rust/issues/38258
     #[cfg(not(target_env = "msvc"))]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, VAddr) -> crate::cxx::CxxOptional<u32>,
+    pub memory_read_code:
+        unsafe extern "C" fn(&CallbackImpl<T>, VAddr) -> crate::cxx::CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut crate::cxx::CxxOptional<u32>, VAddr),
+    pub memory_read_code:
+        unsafe extern "C" fn(&CallbackImpl<T>, *mut crate::cxx::CxxOptional<u32>, VAddr),
 
-    pub memory_read_8: extern "C" fn(&CallbackRef<T>, VAddr) -> u8,
-    pub memory_read_16: extern "C" fn(&CallbackRef<T>, VAddr) -> u16,
-    pub memory_read_32: extern "C" fn(&CallbackRef<T>, VAddr) -> u32,
-    pub memory_read_64: extern "C" fn(&CallbackRef<T>, VAddr) -> u64,
-    pub memory_read_128: extern "C" fn(&CallbackRef<T>, VAddr) -> u128,
-    pub memory_write_8: extern "C" fn(&mut CallbackRef<T>, VAddr, u8),
-    pub memory_write_16: extern "C" fn(&mut CallbackRef<T>, VAddr, u16),
-    pub memory_write_32: extern "C" fn(&mut CallbackRef<T>, VAddr, u32),
-    pub memory_write_64: extern "C" fn(&mut CallbackRef<T>, VAddr, u64),
-    pub memory_write_128: extern "C" fn(&mut CallbackRef<T>, VAddr, u128),
-    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackRef<T>, VAddr, u8, u8) -> bool,
-    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackRef<T>, VAddr, u16, u16) -> bool,
-    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackRef<T>, VAddr, u32, u32) -> bool,
-    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackRef<T>, VAddr, u64, u64) -> bool,
-    pub memory_write_exclusive_128: extern "C" fn(&mut CallbackRef<T>, VAddr, u128, u128) -> bool,
+    pub memory_read_8: extern "C" fn(&CallbackImpl<T>, VAddr) -> u8,
+    pub memory_read_16: extern "C" fn(&CallbackImpl<T>, VAddr) -> u16,
+    pub memory_read_32: extern "C" fn(&CallbackImpl<T>, VAddr) -> u32,
+    pub memory_read_64: extern "C" fn(&CallbackImpl<T>, VAddr) -> u64,
+    pub memory_read_128: extern "C" fn(&CallbackImpl<T>, VAddr) -> u128,
+    pub memory_write_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8),
+    pub memory_write_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16),
+    pub memory_write_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32),
+    pub memory_write_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64),
+    pub memory_write_128: extern "C" fn(&mut CallbackImpl<T>, VAddr, u128),
+    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8, u8) -> bool,
+    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16, u16) -> bool,
+    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32, u32) -> bool,
+    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64, u64) -> bool,
+    pub memory_write_exclusive_128: extern "C" fn(&mut CallbackImpl<T>, VAddr, u128, u128) -> bool,
 
-    pub is_readonly_memory: extern "C" fn(&CallbackRef<T>, VAddr) -> bool,
-    pub interpreter_fallback: extern "C" fn(&mut CallbackRef<T>, VAddr, usize),
-    pub call_svc: extern "C" fn(&mut CallbackRef<T>, u32),
-    pub exception_raised: extern "C" fn(&mut CallbackRef<T>, VAddr, Exception),
-    pub data_cache_operation_raised: extern "C" fn(&mut CallbackRef<T>, DataCacheOperation, VAddr),
-    pub instruction_cache_operation_raised: extern "C" fn(&mut CallbackRef<T>, InstructionCacheOperation, VAddr),
-    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackRef<T>),
-    pub add_ticks: extern "C" fn(&mut CallbackRef<T>, u64),
-    pub get_ticks_remaining: extern "C" fn(&CallbackRef<T>) -> u64,
-    pub get_cntpct: extern "C" fn(&CallbackRef<T>) -> u64,
+    pub is_readonly_memory: extern "C" fn(&CallbackImpl<T>, VAddr) -> bool,
+    pub interpreter_fallback: extern "C" fn(&mut CallbackImpl<T>, VAddr, usize),
+    pub call_svc: extern "C" fn(&mut CallbackImpl<T>, u32),
+    pub exception_raised: extern "C" fn(&mut CallbackImpl<T>, VAddr, Exception),
+    pub data_cache_operation_raised: extern "C" fn(&mut CallbackImpl<T>, DataCacheOperation, VAddr),
+    pub instruction_cache_operation_raised:
+        extern "C" fn(&mut CallbackImpl<T>, InstructionCacheOperation, VAddr),
+    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackImpl<T>),
+    pub add_ticks: extern "C" fn(&mut CallbackImpl<T>, u64),
+    pub get_ticks_remaining: extern "C" fn(&CallbackImpl<T>) -> u64,
+    pub get_cntpct: extern "C" fn(&CallbackImpl<T>) -> u64,
 }
 
 #[repr(C)]
 pub struct DynarmicConfig<T> {
-    pub callbacks: *mut CallbackRef<T>,
+    pub callbacks: *mut CallbackImpl<T>,
     pub processor_id: usize,
     pub global_monitor: *mut crate::ExclusiveMonitor,
     pub optimizations: OptimizationFlag,
@@ -63,8 +66,8 @@ pub struct DynarmicConfig<T> {
     pub cntfrq_el0: u32,
     pub ctr_el0: u32,
     pub dczid_el0: u32,
-    pub tpidrro_el0: *mut u64,
-    pub tpidr_el0: *mut u64,
+    pub tpidrro_el0: *mut std::ffi::c_void,
+    pub tpidr_el0: *mut std::ffi::c_void,
     pub page_table: *mut *mut std::ffi::c_void,
     pub page_table_address_space_bits: usize,
     pub page_table_pointer_mask_bits: std::os::raw::c_int,
@@ -150,26 +153,31 @@ pub enum InstructionCacheOperation {
 
 /// Callback functions that dynarmic will use to access memory and
 /// when the code calls for a higher exception level (e.g. SVC calls)
-pub trait Callbacks : Sized {
+pub trait Callbacks: Sized {
     /// All reads through this callback are 4-byte aligned.
     /// Memory must be interpreted as little endian.
-    fn memory_read_code(cb: &CallbackRef<Self>, addr: VAddr) -> Option<u32> {
+    fn memory_read_code(cb: &CallbackImpl<Self>, addr: VAddr) -> Option<u32> {
         Some(Self::memory_read(cb, addr))
     }
 
-    extern "C" fn memory_read<T: GuestInt>(cb: &CallbackRef<Self>, addr: VAddr) -> T;
-    extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
-    extern "C" fn memory_write_exclusive<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
+    extern "C" fn memory_read<T: GuestInt>(cb: &CallbackImpl<Self>, addr: VAddr) -> T;
+    extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackImpl<Self>, addr: VAddr, val: T);
+    extern "C" fn memory_write_exclusive<T: GuestInt>(
+        cb: &mut CallbackImpl<Self>,
+        addr: VAddr,
+        val: T,
+        expected: T,
+    ) -> bool;
     /// If this callback returns true, the Jit will assume MemoryRead* callbacks will always
     /// return the same value at any point in time for this vaddr. The Jit may use this information
     /// in optimizations.
     /// The default implementation will always return false.
-    extern "C" fn is_readonly_memory(_cb: &CallbackRef<Self>, _addr: VAddr) -> bool {
+    extern "C" fn is_readonly_memory(_cb: &CallbackImpl<Self>, _addr: VAddr) -> bool {
         false
     }
     /// This function is called when dynarmic doesn't have an implementation for the instruction at `pc` and `num` instructions after.
     /// By default, this function will panic.
-    extern "C" fn interpreter_fallback(cb: &mut CallbackRef<Self>, pc: VAddr, num: usize) {
+    extern "C" fn interpreter_fallback(cb: &mut CallbackImpl<Self>, pc: VAddr, num: usize) {
         panic!(
             "dynarmic: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'",
             Self::memory_read::<u32>(cb, pc),
@@ -177,19 +185,29 @@ pub trait Callbacks : Sized {
             pc
         )
     }
-    extern "C" fn raised_exception(_cb: &mut CallbackRef<Self>, addr: VAddr, exc: Exception) {
-        panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'", )
+    extern "C" fn raised_exception(_cb: &mut CallbackImpl<Self>, addr: VAddr, exc: Exception) {
+        panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'",)
     }
-    extern "C" fn call_svc(cb: &mut CallbackRef<Self>, swi: u32);
-    extern "C" fn data_cache_operation_raised(_cb: &mut CallbackRef<Self>, _op: DataCacheOperation, _addr: VAddr) {}
-    extern "C" fn instruction_cache_operation_raised(_cb: &mut CallbackRef<Self>, _op: InstructionCacheOperation, _addr: VAddr) {}
-    extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackRef<Self>) {}
+    extern "C" fn call_svc(cb: &mut CallbackImpl<Self>, swi: u32);
+    extern "C" fn data_cache_operation_raised(
+        _cb: &mut CallbackImpl<Self>,
+        _op: DataCacheOperation,
+        _addr: VAddr,
+    ) {
+    }
+    extern "C" fn instruction_cache_operation_raised(
+        _cb: &mut CallbackImpl<Self>,
+        _op: InstructionCacheOperation,
+        _addr: VAddr,
+    ) {
+    }
+    extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackImpl<Self>) {}
     /// `ticks` amount of ticks have passed
-    extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64);
+    extern "C" fn add_ticks(cb: &mut CallbackImpl<Self>, ticks: u64);
     /// Returns the remaining amount of ticks before the program stops.
-    extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64;
+    extern "C" fn get_ticks_remaining(cb: &CallbackImpl<Self>) -> u64;
     /// Get value in the emulated counter-timer physical count register.
-    extern "C" fn get_cntpct(cb: &CallbackRef<Self>) -> u64;
+    extern "C" fn get_cntpct(cb: &CallbackImpl<Self>) -> u64;
 }
 
 pub type Jit = u64;
@@ -199,10 +217,10 @@ pub type Jit = u64;
 #[allow(dead_code)]
 pub struct Dynarmic<'a, T: Callbacks> {
     ptr: *mut Jit,
-    cpp_cb: Box<CallbackRef<T>>,
+    cpp_cb: Box<CallbackImpl<T>>,
     rust_cb: Box<T>,
-    tpidr_el0: Option<&'a RefCell<u64>>, // todo: maybe just own it and give rw access through Dynarmic type?
-    tpidrro_el0: Option<&'a RefCell<u64>>,
+
+    _lifetime: PhantomData<&'a ()>, // lifetime for TPIDR_EL0 and TPIDRRO_EL0
 }
 
 impl<'a, T: Callbacks> Drop for Dynarmic<'a, T> {
@@ -216,11 +234,18 @@ impl<'a, T: Callbacks> Drop for Dynarmic<'a, T> {
 
 impl<'a, T: Callbacks> Dynarmic<'a, T> {
     #[cfg(not(target_env = "msvc"))]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> crate::cxx::CxxOptional<u32> {
+    unsafe extern "C" fn memory_read_code_impl(
+        cb: &CallbackImpl<T>,
+        addr: VAddr,
+    ) -> crate::cxx::CxxOptional<u32> {
         T::memory_read_code(cb, addr).unwrap_or(0).into()
     }
     #[cfg(target_env = "msvc")]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, out: *mut crate::cxx::CxxOptional<u32>, addr: VAddr) {
+    unsafe extern "C" fn memory_read_code_impl(
+        cb: &CallbackImpl<T>,
+        out: *mut crate::cxx::CxxOptional<u32>,
+        addr: VAddr,
+    ) {
         unsafe {
             *out = T::memory_read_code(cb, addr).unwrap_or(0).into();
         }
@@ -272,7 +297,7 @@ impl<'a, T: Callbacks> Dynarmic<'a, T> {
     ///
     /// # Safety
     /// - All instructions and memory addresses inputted must be valid. Invalid addresses/instructions will cause dynarmic exceptions, which panic by default.
-    /// - 
+    /// -
     #[inline]
     pub unsafe fn run(&mut self) -> crate::HaltReason {
         unsafe extern "C-unwind" {
@@ -407,7 +432,9 @@ impl<'a, T: Callbacks> Dynarmic<'a, T> {
             pub fn JitA64_GetRegs(this: *mut Jit, out: *mut [u64; 31]) -> *mut u8;
         }
         let mut regs = [0u64; 31];
-        unsafe { JitA64_GetRegs(self.ptr, &mut regs as _); }
+        unsafe {
+            JitA64_GetRegs(self.ptr, &mut regs as _);
+        }
         regs
     }
 
@@ -447,7 +474,9 @@ impl<'a, T: Callbacks> Dynarmic<'a, T> {
             pub fn JitA64_GetVectors(this: *mut Jit, out: *mut [u128; 32]) -> *mut u8;
         }
         let mut regs = [0u128; 32];
-        unsafe { JitA64_GetVectors(self.ptr, &mut regs as _); }
+        unsafe {
+            JitA64_GetVectors(self.ptr, &mut regs as _);
+        }
         regs
     }
 
@@ -473,7 +502,7 @@ impl<'a, T: Callbacks> Dynarmic<'a, T> {
     #[inline]
     pub fn set_fpcr(&mut self, val: u32) {
         unsafe extern "C-unwind" {
-            pub fn JitA64_SetFpcr(this: *mut Jit, value: u32, );
+            pub fn JitA64_SetFpcr(this: *mut Jit, value: u32);
         }
         unsafe { JitA64_SetFpcr(self.ptr, val) }
     }
@@ -535,7 +564,7 @@ impl<'a, T: Callbacks> Dynarmic<'a, T> {
 }
 
 impl<'a, T: Callbacks> Deref for Dynarmic<'a, T> {
-    type Target = CallbackRef<T>;
+    type Target = CallbackImpl<T>;
 
     fn deref(&self) -> &Self::Target {
         self.cpp_cb.as_ref()
@@ -550,8 +579,8 @@ impl<'a, T: Callbacks> DerefMut for Dynarmic<'a, T> {
 
 pub struct Config<'a, T: Callbacks> {
     config: DynarmicConfig<T>,
-    tpidr_el0: Option<&'a RefCell<u64>>,
-    tpidrro_el0: Option<&'a RefCell<u64>>,
+    tpidr_el0: Option<&'a mut std::ffi::c_void>,
+    tpidrro_el0: Option<&'a mut std::ffi::c_void>,
 }
 
 impl<'a, T: Callbacks> Default for Config<'a, T> {
@@ -562,65 +591,71 @@ impl<'a, T: Callbacks> Default for Config<'a, T> {
 
 impl<'a, T: Callbacks> Config<'a, T> {
     pub fn new() -> Self {
-        Self { config: DynarmicConfig {
-            callbacks: unsafe { std::mem::zeroed() },
-            processor_id: 0,
-            global_monitor: unsafe { std::mem::zeroed() }, // todo
-            optimizations: OptimizationFlag::ALL,
-            unsafe_optimizations: false,
-            hook_data_cache_operations: false,
-            hook_isb: false,
-            hook_hint_instructions: false,
-            cntfrq_el0: 600000000,
-            ctr_el0: 0x8444c004,
-            dczid_el0: 4,
-            tpidrro_el0: std::ptr::null_mut(),
-            tpidr_el0: std::ptr::null_mut(),
-            page_table: std::ptr::null_mut(),
-            page_table_address_space_bits: 36,
-            page_table_pointer_mask_bits: 0,
-            silently_mirror_page_table: true,
-            absolute_offset_page_table: false,
-            detect_misaligned_access_via_page_table: 8 | 16 | 32 | 64,
-            only_detect_misalignment_via_page_table_on_page_boundary: true,
-            fastmem_pointer: 0usize.into(),
-            recompile_on_fastmem_failure: true,
-            fastmem_address_space_bits: 36,
-            silently_mirror_fastmem: true,
-            fastmem_exclusive_access: false,
-            recompile_on_exclusive_fastmem_failure: true,
-            define_unpredictable_behaviour: false,
-            wall_clock_cntpct: false,
-            check_halt_on_memory_access: false,
-            enable_cycle_counting: true,
-            code_cache_size: 128 * 1024 * 1024,
-            very_verbose_debugging_output: false,
-        }, tpidr_el0: None, tpidrro_el0: None, }
+        Self {
+            config: DynarmicConfig {
+                callbacks: unsafe { std::mem::zeroed() },
+                processor_id: 0,
+                global_monitor: unsafe { std::mem::zeroed() }, // todo
+                optimizations: OptimizationFlag::ALL,
+                unsafe_optimizations: false,
+                hook_data_cache_operations: false,
+                hook_isb: false,
+                hook_hint_instructions: false,
+                cntfrq_el0: 600000000,
+                ctr_el0: 0x8444c004,
+                dczid_el0: 4,
+                tpidrro_el0: std::ptr::null_mut(),
+                tpidr_el0: std::ptr::null_mut(),
+                page_table: std::ptr::null_mut(),
+                page_table_address_space_bits: 36,
+                page_table_pointer_mask_bits: 0,
+                silently_mirror_page_table: true,
+                absolute_offset_page_table: false,
+                detect_misaligned_access_via_page_table: 8 | 16 | 32 | 64,
+                only_detect_misalignment_via_page_table_on_page_boundary: true,
+                fastmem_pointer: 0usize.into(),
+                recompile_on_fastmem_failure: true,
+                fastmem_address_space_bits: 36,
+                silently_mirror_fastmem: true,
+                fastmem_exclusive_access: false,
+                recompile_on_exclusive_fastmem_failure: true,
+                define_unpredictable_behaviour: false,
+                wall_clock_cntpct: false,
+                check_halt_on_memory_access: false,
+                enable_cycle_counting: true,
+                code_cache_size: 128 * 1024 * 1024,
+                very_verbose_debugging_output: false,
+            },
+            tpidr_el0: None,
+            tpidrro_el0: None,
+        }
     }
     pub fn init(&mut self, cb: T) -> Dynarmic<'a, T> {
         unsafe extern "C-unwind" {
             pub fn new_a64_jit(conf: *mut DynarmicConfig<u8>) -> *mut Jit;
         }
         let mut cb = Box::new(cb);
-        let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
-            vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ()).byte_add(crate::cxx::VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
+        let mut cpp_cb: Box<CallbackImpl<T>> = Box::new(CallbackImpl {
+            vtable: unsafe {
+                (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ())
+                    .byte_add(crate::cxx::VTABLE_DIFF)
+            }, // SAFETY: vtable_diff is ensured by abi-specific code
             ptr: cb.as_mut(),
         });
 
         self.config.callbacks = cpp_cb.as_mut();
-        if self.tpidr_el0.is_some() {
-            self.config.tpidr_el0 = self.tpidr_el0.unwrap().as_ptr()
+        if let Some(tpidr_el0) = self.tpidr_el0.as_deref_mut() {
+            self.config.tpidr_el0 = tpidr_el0;
         }
-        if self.tpidrro_el0.is_some() {
-            self.config.tpidrro_el0 = self.tpidrro_el0.unwrap().as_ptr()
+        if let Some(tpidrro_el0) = self.tpidrro_el0.as_deref_mut() {
+            self.config.tpidrro_el0 = tpidrro_el0;
         }
 
         Dynarmic {
             ptr: unsafe { &mut *new_a64_jit((&mut self.config as *mut DynarmicConfig<T>).cast()) }, // safety: we're casting T, which has no effect on memory layout
             cpp_cb,
             rust_cb: cb,
-            tpidr_el0: self.tpidr_el0,
-            tpidrro_el0: self.tpidrro_el0,
+            _lifetime: PhantomData,
         }
     }
 
@@ -644,7 +679,13 @@ impl<'a, T: Callbacks> Config<'a, T> {
     ///
     /// # Safety
     /// - `ptr` must be a valid pointer pointing to a correctly sized memory space allocated with read/write access.
-    pub unsafe fn fastmem(&mut self, ptr: *mut std::ffi::c_void, address_space_bits: usize, recompile_on_fault: bool, silently_mirror: bool) -> &mut Self {
+    pub unsafe fn fastmem(
+        &mut self,
+        ptr: *mut std::ffi::c_void,
+        address_space_bits: usize,
+        recompile_on_fault: bool,
+        silently_mirror: bool,
+    ) -> &mut Self {
         self.config.fastmem_pointer = (ptr as usize).into();
         self.config.fastmem_address_space_bits = address_space_bits;
         self.config.recompile_on_fastmem_failure = recompile_on_fault;
@@ -658,7 +699,11 @@ impl<'a, T: Callbacks> Config<'a, T> {
     ///
     /// On x64, dynarmic currently relies on x64 cmpxchg semantics which may not provide
     /// fully accurate emulation.
-    pub fn fastmem_exclusive(&mut self, exclusive_access: bool, recompile_on_fault: bool) -> &mut Self {
+    pub fn fastmem_exclusive(
+        &mut self,
+        exclusive_access: bool,
+        recompile_on_fault: bool,
+    ) -> &mut Self {
         self.config.fastmem_exclusive_access = exclusive_access;
         self.config.recompile_on_exclusive_fastmem_failure = recompile_on_fault;
 
@@ -741,17 +786,34 @@ impl<'a, T: Callbacks> Config<'a, T> {
         self
     }
 
-    /// Pointer to where TPIDRRO_EL0 is stored. This pointer will be inserted into
-    /// emitted code.
-    pub fn tpidrro_el0(&mut self, val: &'a RefCell<u64>) -> &mut Self {
-        self.tpidrro_el0 = Some(val);
+    /// Set the pointer/reference to where TPIDRRO_EL0 is stored. This pointer
+    /// will be inserted into emitted code.
+    ///
+    /// # Safety
+    /// - `ref` must be a valid reference living for `'a` long.
+    /// - Guest code may or may not modify the struct, potentially causing undefined behavior.
+    pub unsafe fn tpidrro_el0<V>(&mut self, val: &'a mut V) -> &mut Self
+    where
+        V: Sized,
+    {
+        self.tpidr_el0 =
+            Some(unsafe { std::mem::transmute::<&'a mut V, &'a mut std::ffi::c_void>(val) }); // safety: transmuting to drop V, we don't need to know this nor complicate generics further
 
         self
     }
-    /// Pointer to where TPIDR_EL0 is stored. This pointer will be inserted into
-    /// emitted code.
-    pub fn tpidr_el0(&mut self, val: &'a RefCell<u64>) -> &mut Self {
-        self.tpidr_el0 = Some(val);
+
+    /// Set the pointer/reference to where TPIDR_EL0 is stored. This pointer
+    /// will be inserted into emitted code.
+    ///
+    /// # Safety
+    /// - `ref` must be a valid reference living for `'a` long.
+    /// - Guest code may or may not modify the struct, potentially causing undefined behavior.
+    pub unsafe fn tpidr_el0<V>(&mut self, val: &'a mut V) -> &mut Self
+    where
+        V: Sized,
+    {
+        self.tpidr_el0 =
+            Some(unsafe { std::mem::transmute::<&'a mut V, &'a mut std::ffi::c_void>(val) }); // safety: transmuting to drop V, we don't need to know this nor complicate generics further
 
         self
     }
@@ -765,7 +827,12 @@ impl<'a, T: Callbacks> Config<'a, T> {
     /// # Safety
     /// - `table` must be a valid pointer pointing to an array of pointers of size 2^`address_space_bits`.
     /// - `address_space_bits` must be a value between 12 and 64 inclusive.
-    pub unsafe fn page_table(&mut self, table: *mut *mut std::ffi::c_void, address_space_bits: usize, silently_mirror: bool) -> &mut Self {
+    pub unsafe fn page_table(
+        &mut self,
+        table: *mut *mut std::ffi::c_void,
+        address_space_bits: usize,
+        silently_mirror: bool,
+    ) -> &mut Self {
         self.config.page_table = table;
         self.config.page_table_address_space_bits = address_space_bits;
         self.config.silently_mirror_page_table = silently_mirror;

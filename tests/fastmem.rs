@@ -1,6 +1,6 @@
 mod a32 {
     use dynarmic::a32::{Callbacks, VAddr};
-    use dynarmic::{CallbackRef, DynarmicA32, GuestInt};
+    use dynarmic::{CallbackImpl, DynarmicA32, GuestInt};
     use std::cmp::Ordering;
     struct ArmFastmemTestEnv {
         ticks_left: u64,
@@ -17,7 +17,7 @@ mod a32 {
     }
 
     impl Callbacks for ArmFastmemTestEnv {
-        extern "C" fn memory_read<T>(cb: &CallbackRef<Self>, addr: VAddr) -> T {
+        extern "C" fn memory_read<T>(cb: &CallbackImpl<Self>, addr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -26,7 +26,7 @@ mod a32 {
             }
         }
 
-        extern "C" fn memory_write<T>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T) {
+        extern "C" fn memory_write<T>(cb: &mut CallbackImpl<Self>, addr: VAddr, val: T) {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(addr as usize)
@@ -36,7 +36,7 @@ mod a32 {
         }
 
         extern "C" fn memory_write_exclusive<T: GuestInt>(
-            cb: &mut CallbackRef<Self>,
+            cb: &mut CallbackImpl<Self>,
             addr: VAddr,
             val: T,
             _expected: T,
@@ -45,11 +45,11 @@ mod a32 {
             true
         }
 
-        extern "C" fn call_svc(_cb: &mut CallbackRef<Self>, _swi: u32) {
+        extern "C" fn call_svc(_cb: &mut CallbackImpl<Self>, _swi: u32) {
             unimplemented!()
         }
 
-        extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64) {
+        extern "C" fn add_ticks(cb: &mut CallbackImpl<Self>, ticks: u64) {
             if ticks > cb.ticks_left {
                 cb.ticks_left = 0;
                 return;
@@ -57,7 +57,7 @@ mod a32 {
             cb.ticks_left -= ticks;
         }
 
-        extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &CallbackImpl<Self>) -> u64 {
             cb.ticks_left
         }
     }
@@ -112,7 +112,7 @@ mod a32 {
 }
 mod a64 {
     use dynarmic::a64::{Callbacks, VAddr};
-    use dynarmic::{CallbackRef, DynarmicA64, GuestInt};
+    use dynarmic::{CallbackImpl, DynarmicA64, GuestInt};
     use std::cmp::Ordering;
 
     #[repr(C)]
@@ -131,7 +131,7 @@ mod a64 {
     }
 
     impl Callbacks for A64FastmemTestEnv {
-        extern "C" fn memory_read<T>(cb: &CallbackRef<Self>, vaddr: VAddr) -> T {
+        extern "C" fn memory_read<T>(cb: &CallbackImpl<Self>, vaddr: VAddr) -> T {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(vaddr as usize)
@@ -139,7 +139,7 @@ mod a64 {
                     .read()
             }
         }
-        extern "C" fn memory_write<T>(cb: &mut CallbackRef<Self>, vaddr: VAddr, val: T) {
+        extern "C" fn memory_write<T>(cb: &mut CallbackImpl<Self>, vaddr: VAddr, val: T) {
             unsafe {
                 cb.backing_memory
                     .wrapping_add(vaddr as usize)
@@ -148,7 +148,7 @@ mod a64 {
             }
         }
         extern "C" fn memory_write_exclusive<T: GuestInt>(
-            cb: &mut CallbackRef<Self>,
+            cb: &mut CallbackImpl<Self>,
             addr: VAddr,
             val: T,
             _expected: T,
@@ -157,21 +157,21 @@ mod a64 {
             true
         }
 
-        extern "C" fn call_svc(_cb: &mut CallbackRef<Self>, _swi: u32) {
+        extern "C" fn call_svc(_cb: &mut CallbackImpl<Self>, _swi: u32) {
             unimplemented!()
         }
 
-        extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64) {
+        extern "C" fn add_ticks(cb: &mut CallbackImpl<Self>, ticks: u64) {
             if ticks > cb.ticks_left {
                 cb.ticks_left = 0;
                 return;
             }
             cb.ticks_left -= ticks;
         }
-        extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64 {
+        extern "C" fn get_ticks_remaining(cb: &CallbackImpl<Self>) -> u64 {
             cb.ticks_left
         }
-        extern "C" fn get_cntpct(cb: &CallbackRef<Self>) -> u64 {
+        extern "C" fn get_cntpct(cb: &CallbackImpl<Self>) -> u64 {
             0x10000000000 - cb.ticks_left
         }
     }

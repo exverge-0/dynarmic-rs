@@ -1,4 +1,4 @@
-use crate::{cxx::CxxOptional, cxx::CxxSharedPtr, CallbackRef, GuestInt, OptimizationFlag};
+use crate::{cxx::CxxOptional, cxx::CxxSharedPtr, CallbackImpl, GuestInt, OptimizationFlag};
 use std::ops::{Deref, DerefMut};
 pub type VAddr = u32;
 
@@ -14,13 +14,13 @@ struct DynarmicCallbacks<T> {
 
     // https://github.com/rust-lang/rust/issues/38258
     #[cfg(not(target_env = "msvc"))]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, VAddr) -> CxxOptional<u32>,
+    pub memory_read_code: unsafe extern "C" fn(&CallbackImpl<T>, VAddr) -> CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackRef<T>, *mut CxxOptional<u32>, VAddr),
+    pub memory_read_code: unsafe extern "C" fn(&CallbackImpl<T>, *mut CxxOptional<u32>, VAddr),
 
-    pub pre_code_read_hook: extern "C" fn(&mut CallbackRef<T>, bool, VAddr, &IREmitter) -> bool,
-    pub pre_code_translation_hook: extern "C" fn(&mut CallbackRef<T>, bool, VAddr, &IREmitter),
-    pub get_ticks_for_code: extern "C" fn(&mut CallbackRef<T>, bool, VAddr, u32) -> u64,
+    pub pre_code_read_hook: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, &IREmitter) -> bool,
+    pub pre_code_translation_hook: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, &IREmitter),
+    pub get_ticks_for_code: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, u32) -> u64,
 
     // these functions should never be called; UserCallbacks should always be owned by Rust
     pub cpp_destructor: extern "C" fn(),
@@ -28,31 +28,31 @@ struct DynarmicCallbacks<T> {
     pub itanium_destructor: extern "C" fn(),
 
     // UserCallbacks
-    pub memory_read_8: extern "C" fn(&CallbackRef<T>, VAddr) -> u8,
-    pub memory_read_16: extern "C" fn(&CallbackRef<T>, VAddr) -> u16,
-    pub memory_read_32: extern "C" fn(&CallbackRef<T>, VAddr) -> u32,
-    pub memory_read_64: extern "C" fn(&CallbackRef<T>, VAddr) -> u64,
-    pub memory_write_8: extern "C" fn(&mut CallbackRef<T>, VAddr, u8),
-    pub memory_write_16: extern "C" fn(&mut CallbackRef<T>, VAddr, u16),
-    pub memory_write_32: extern "C" fn(&mut CallbackRef<T>, VAddr, u32),
-    pub memory_write_64: extern "C" fn(&mut CallbackRef<T>, VAddr, u64),
-    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackRef<T>, VAddr, u8, u8) -> bool,
-    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackRef<T>, VAddr, u16, u16) -> bool,
-    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackRef<T>, VAddr, u32, u32) -> bool,
-    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackRef<T>, VAddr, u64, u64) -> bool,
+    pub memory_read_8: extern "C" fn(&CallbackImpl<T>, VAddr) -> u8,
+    pub memory_read_16: extern "C" fn(&CallbackImpl<T>, VAddr) -> u16,
+    pub memory_read_32: extern "C" fn(&CallbackImpl<T>, VAddr) -> u32,
+    pub memory_read_64: extern "C" fn(&CallbackImpl<T>, VAddr) -> u64,
+    pub memory_write_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8),
+    pub memory_write_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16),
+    pub memory_write_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32),
+    pub memory_write_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64),
+    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8, u8) -> bool,
+    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16, u16) -> bool,
+    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32, u32) -> bool,
+    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64, u64) -> bool,
 
-    pub is_readonly_memory: extern "C" fn(&CallbackRef<T>, VAddr) -> bool,
-    pub interpreter_fallback: extern "C" fn(&mut CallbackRef<T>, VAddr, usize),
-    pub call_svc: extern "C" fn(&mut CallbackRef<T>, u32),
-    pub exception_raised: extern "C" fn(&mut CallbackRef<T>, VAddr, Exception),
-    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackRef<T>),
-    pub add_ticks: extern "C" fn(&mut CallbackRef<T>, u64),
-    pub get_ticks_remaining: extern "C" fn(&CallbackRef<T>) -> u64,
+    pub is_readonly_memory: extern "C" fn(&CallbackImpl<T>, VAddr) -> bool,
+    pub interpreter_fallback: extern "C" fn(&mut CallbackImpl<T>, VAddr, usize),
+    pub call_svc: extern "C" fn(&mut CallbackImpl<T>, u32),
+    pub exception_raised: extern "C" fn(&mut CallbackImpl<T>, VAddr, Exception),
+    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackImpl<T>),
+    pub add_ticks: extern "C" fn(&mut CallbackImpl<T>, u64),
+    pub get_ticks_remaining: extern "C" fn(&CallbackImpl<T>) -> u64,
 }
 
 #[repr(C)]
 pub(crate) struct DynarmicConfig<T> {
-    pub callbacks: *mut CallbackRef<T>,
+    pub callbacks: *mut CallbackImpl<T>,
     pub processor_id: usize,
     pub global_monitor: *mut crate::ExclusiveMonitor,
     pub arch_version: ArchVersion,
@@ -157,42 +157,65 @@ pub enum CoprocReg {
 
 /// Callback functions that dynarmic will use to access memory and
 /// when the code calls for a higher exception level (e.g. SVC calls)
-pub trait Callbacks : Sized {
+pub trait Callbacks: Sized {
     /// All reads through this callback are 4-byte aligned.
     /// Memory must be interpreted as little endian.
-    fn memory_read_code(cb: &CallbackRef<Self>, addr: VAddr) -> Option<u32> { Some(Self::memory_read(cb, addr)) }
+    fn memory_read_code(cb: &CallbackImpl<Self>, addr: VAddr) -> Option<u32> {
+        Some(Self::memory_read(cb, addr))
+    }
 
     /// This function is called before the instruction at pc is read.
     /// IR code can be emitted by the callee prior to instruction handling.
     /// By returning true the callee precludes the translation of the instruction;
     /// in such case the callee is responsible for setting the terminal.
     // TODO: IREmitter
-    extern "C" fn pre_code_read_hook(_cb: &mut CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _ir: &IREmitter) -> bool {
+    extern "C" fn pre_code_read_hook(
+        _cb: &mut CallbackImpl<Self>,
+        _is_thumb: bool,
+        _pc: VAddr,
+        _ir: &IREmitter,
+    ) -> bool {
         true
     }
 
     /// This function is called before the instruction at pc is interpreted.
     /// IR code can be emitted by the callee prior to translation of the instruction.
-    extern "C" fn pre_code_translation_hook(_cb: &mut CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _ir: &IREmitter) {}
+    extern "C" fn pre_code_translation_hook(
+        _cb: &mut CallbackImpl<Self>,
+        _is_thumb: bool,
+        _pc: VAddr,
+        _ir: &IREmitter,
+    ) {
+    }
 
-    extern "C" fn get_ticks_for_code(_cb: &mut CallbackRef<Self>, _is_thumb: bool, _pc: VAddr, _instruct: u32) -> u64 {
+    extern "C" fn get_ticks_for_code(
+        _cb: &mut CallbackImpl<Self>,
+        _is_thumb: bool,
+        _pc: VAddr,
+        _instruct: u32,
+    ) -> u64 {
         1
     }
 
-    extern "C" fn memory_read<T: GuestInt>(cb: &CallbackRef<Self>, addr: VAddr) -> T;
-    extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T);
-    extern "C" fn memory_write_exclusive<T: GuestInt>(cb: &mut CallbackRef<Self>, addr: VAddr, val: T, expected: T) -> bool;
+    extern "C" fn memory_read<T: GuestInt>(cb: &CallbackImpl<Self>, addr: VAddr) -> T;
+    extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackImpl<Self>, addr: VAddr, val: T);
+    extern "C" fn memory_write_exclusive<T: GuestInt>(
+        cb: &mut CallbackImpl<Self>,
+        addr: VAddr,
+        val: T,
+        expected: T,
+    ) -> bool;
 
     /// If this callback returns true, the JIT will assume MemoryRead* callbacks will always
     /// return the same value at any point in time for this vaddr. The JIT may use this information
     /// in optimizations.
     /// The default implementation will always return false.
-    extern "C" fn is_readonly_memory(_cb: &CallbackRef<Self>, _addr: VAddr) -> bool {
+    extern "C" fn is_readonly_memory(_cb: &CallbackImpl<Self>, _addr: VAddr) -> bool {
         false
     }
     /// This function is called when dynarmic doesn't have an implementation for the instruction at `pc` and `num` instructions after.
     /// By default, this function will panic.
-    extern "C" fn interpreter_fallback(cb: &mut CallbackRef<Self>, pc: VAddr, num: usize) {
+    extern "C" fn interpreter_fallback(cb: &mut CallbackImpl<Self>, pc: VAddr, num: usize) {
         panic!(
             "dynarmic: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'",
             Self::memory_read::<u32>(cb, pc),
@@ -200,21 +223,21 @@ pub trait Callbacks : Sized {
             pc
         )
     }
-    extern "C" fn raised_exception(_cb: &mut CallbackRef<Self>, addr: VAddr, exc: Exception) {
-        panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'", )
+    extern "C" fn raised_exception(_cb: &mut CallbackImpl<Self>, addr: VAddr, exc: Exception) {
+        panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'",)
     }
-    extern "C" fn call_svc(cb: &mut CallbackRef<Self>, swi: u32);
-    extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackRef<Self>) {}
+    extern "C" fn call_svc(cb: &mut CallbackImpl<Self>, swi: u32);
+    extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackImpl<Self>) {}
     /// `ticks` amount of ticks have passed
-    extern "C" fn add_ticks(cb: &mut CallbackRef<Self>, ticks: u64);
+    extern "C" fn add_ticks(cb: &mut CallbackImpl<Self>, ticks: u64);
     /// Returns the remaining amount of ticks before the program stops.
-    extern "C" fn get_ticks_remaining(cb: &CallbackRef<Self>) -> u64;
+    extern "C" fn get_ticks_remaining(cb: &CallbackImpl<Self>) -> u64;
 }
 
 #[repr(C)]
 pub(crate) struct Jit {
     is_executing: bool,
-    _ptr: u64
+    _ptr: u64,
 }
 
 const _: () = assert!(size_of::<Jit>() == 16);
@@ -224,7 +247,7 @@ const _: () = assert!(size_of::<Jit>() == 16);
 #[allow(dead_code)]
 pub struct Dynarmic<T: Callbacks> {
     ptr: *mut Jit,
-    cpp_cb: Box<CallbackRef<T>>,
+    cpp_cb: Box<CallbackImpl<T>>,
     rust_cb: Box<T>,
 }
 
@@ -238,13 +261,19 @@ impl<T: Callbacks> Drop for Dynarmic<T> {
 }
 
 impl<T: Callbacks> Dynarmic<T> {
-
     #[cfg(not(target_env = "msvc"))]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, addr: VAddr) -> CxxOptional<u32> {
+    unsafe extern "C" fn memory_read_code_impl(
+        cb: &CallbackImpl<T>,
+        addr: VAddr,
+    ) -> CxxOptional<u32> {
         T::memory_read_code(cb, addr).unwrap_or(0).into()
     }
     #[cfg(target_env = "msvc")]
-    unsafe extern "C" fn memory_read_code_impl(cb: &CallbackRef<T>, out: *mut CxxOptional<u32>, addr: VAddr) {
+    unsafe extern "C" fn memory_read_code_impl(
+        cb: &CallbackImpl<T>,
+        out: *mut CxxOptional<u32>,
+        addr: VAddr,
+    ) {
         unsafe {
             *out = T::memory_read_code(cb, addr).unwrap_or(0).into();
         }
@@ -282,7 +311,7 @@ impl<T: Callbacks> Dynarmic<T> {
         add_ticks: T::add_ticks,
         get_ticks_remaining: T::get_ticks_remaining,
     };
-    
+
     #[inline(always)]
     pub fn new_config() -> Config<T> {
         Config::new()
@@ -469,7 +498,7 @@ impl<T: Callbacks> Dynarmic<T> {
     #[inline]
     pub fn set_fpscr(&mut self, val: u32) {
         unsafe extern "C-unwind" {
-            pub fn JitA32_SetFpscr(this: *mut Jit, value: u32, );
+            pub fn JitA32_SetFpscr(this: *mut Jit, value: u32);
         }
         unsafe { JitA32_SetFpscr(self.ptr, val) }
     }
@@ -492,7 +521,7 @@ impl<T: Callbacks> Dynarmic<T> {
 }
 
 impl<T: Callbacks> Deref for Dynarmic<T> {
-    type Target = CallbackRef<T>;
+    type Target = CallbackImpl<T>;
 
     fn deref(&self) -> &Self::Target {
         self.cpp_cb.as_ref()
@@ -506,7 +535,7 @@ impl<T: Callbacks> DerefMut for Dynarmic<T> {
 }
 
 pub struct Config<T: Callbacks> {
-    config: DynarmicConfig<T>
+    config: DynarmicConfig<T>,
 }
 
 impl<T: Callbacks> Default for Config<T> {
@@ -517,33 +546,35 @@ impl<T: Callbacks> Default for Config<T> {
 
 impl<T: Callbacks> Config<T> {
     pub fn new() -> Self {
-        Self { config: DynarmicConfig {
-            callbacks: unsafe { std::mem::zeroed() },
-            processor_id: 0,
-            global_monitor: unsafe { std::mem::zeroed() }, // todo
-            arch_version: ArchVersion::V8,
-            optimizations: OptimizationFlag::ALL,
-            unsafe_optimizations: false,
-            page_table: std::ptr::null_mut(),
-            absolute_offset_page_table: true,
-            page_table_pointer_mask_bits: 0,
-            detect_misaligned_access_via_page_table: 8 | 16 | 32 | 64,
-            only_detect_misalignment_via_page_table_on_page_boundary: true,
-            fastmem_pointer: 0usize.into(),
-            recompile_on_fastmem_failure: true,
-            fastmem_exclusive_access: false,
-            recompile_on_exclusive_fastmem_failure: true,
-            coprocessors: Default::default(),
-            hook_isb: false,
-            hook_hint_instructions: false,
-            define_unpredictable_behaviour: false,
-            wall_clock_cntpct: false,
-            check_halt_on_memory_access: false,
-            enable_cycle_counting: true,
-            always_little_endian: false,
-            code_cache_size: 128 * 1024 * 1024,
-            very_verbose_debugging_output: false,
-        } }
+        Self {
+            config: DynarmicConfig {
+                callbacks: unsafe { std::mem::zeroed() },
+                processor_id: 0,
+                global_monitor: unsafe { std::mem::zeroed() }, // todo
+                arch_version: ArchVersion::V8,
+                optimizations: OptimizationFlag::ALL,
+                unsafe_optimizations: false,
+                page_table: std::ptr::null_mut(),
+                absolute_offset_page_table: true,
+                page_table_pointer_mask_bits: 0,
+                detect_misaligned_access_via_page_table: 8 | 16 | 32 | 64,
+                only_detect_misalignment_via_page_table_on_page_boundary: true,
+                fastmem_pointer: 0usize.into(),
+                recompile_on_fastmem_failure: true,
+                fastmem_exclusive_access: false,
+                recompile_on_exclusive_fastmem_failure: true,
+                coprocessors: Default::default(),
+                hook_isb: false,
+                hook_hint_instructions: false,
+                define_unpredictable_behaviour: false,
+                wall_clock_cntpct: false,
+                check_halt_on_memory_access: false,
+                enable_cycle_counting: true,
+                always_little_endian: false,
+                code_cache_size: 128 * 1024 * 1024,
+                very_verbose_debugging_output: false,
+            },
+        }
     }
     pub fn init(&mut self, cb: T) -> Dynarmic<T> {
         unsafe extern "C-unwind" {
@@ -551,8 +582,11 @@ impl<T: Callbacks> Config<T> {
         }
 
         let mut cb = Box::new(cb);
-        let mut cpp_cb: Box<CallbackRef<T>> = Box::new(CallbackRef {
-            vtable: unsafe { (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ()).byte_add(crate::cxx::VTABLE_DIFF) }, // SAFETY: vtable_diff is ensured by abi-specific code
+        let mut cpp_cb: Box<CallbackImpl<T>> = Box::new(CallbackImpl {
+            vtable: unsafe {
+                (&Dynarmic::<T>::CALLBACKS as *const DynarmicCallbacks<T> as *const ())
+                    .byte_add(crate::cxx::VTABLE_DIFF)
+            }, // SAFETY: vtable_diff is ensured by abi-specific code
             ptr: cb.as_mut(),
         });
         self.config.callbacks = cpp_cb.as_mut();
@@ -567,28 +601,32 @@ impl<T: Callbacks> Config<T> {
     /// Sets the processor id.
     pub fn processor_id(&mut self, id: usize) -> &mut Self {
         self.config.processor_id = id;
-        
+
         self
     }
-    
+
     /// Sets the fastmem pointer and determines whether dynarmic should recompile without fastmem
     /// if a pagefault is reached.
-    /// 
+    ///
     /// # Safety
     /// - `ptr` must be a valid pointer pointing to a memory space allocated with read/write access.
     /// - The guest code should not attempt to access outside the memory range of `ptr`. Note that dynarmic will not fallback to [memory_read](Callbacks::memory_read)/[memory_write](Callbacks::memory_write)
     ///   when exceeding the fastmem address space as it does not know the size.
-    /// 
-    pub unsafe fn fastmem(&mut self, ptr: *mut std::ffi::c_void, recompile_on_fault: bool) -> &mut Self {
+    ///
+    pub unsafe fn fastmem(
+        &mut self,
+        ptr: *mut std::ffi::c_void,
+        recompile_on_fault: bool,
+    ) -> &mut Self {
         self.config.fastmem_pointer = (ptr as usize).into();
         self.config.recompile_on_fastmem_failure = recompile_on_fault;
-        
+
         self
     }
 
     /// Determines if dynarmic should use the above fastmem_pointer for exclusive reads and
-    /// writes and if dynarmic should recompile without fastmem if a pagefault is reached. 
-    /// 
+    /// writes and if dynarmic should recompile without fastmem if a pagefault is reached.
+    ///
     /// On x64, dynarmic currently relies on x64 cmpxchg semantics which may not provide
     /// fully accurate emulation.
     pub fn fastmem_exclusive(&mut self, exclusive_access: bool, recompile_on_fault: bool) {
@@ -629,7 +667,7 @@ impl<T: Callbacks> Config<T> {
     pub unsafe fn page_table(&mut self, table: *mut [*mut u8; 1 << (32 - 12)]) {
         self.config.page_table = table;
     }
-    
+
     /// Masks out the first N bits in host pointers from the page table.
     /// The intention behind this is to allow users of Dynarmic to pack attributes in the
     /// same integer and update the pointer attribute pair atomically.
@@ -638,15 +676,15 @@ impl<T: Callbacks> Config<T> {
         self.config.absolute_offset_page_table = false;
         self.config.page_table_pointer_mask_bits = mask_bits;
     }
-    
+
     /// Enable/disable hooks for `ISB` and hint instructions.
-    /// 
+    ///
     /// - `isb` - when enabled, [instruction_synchronization_barrier_raised](Callbacks::instruction_synchronization_barrier_raised)
     ///   will be called, otherwise it is treated as a NOP
-    /// - `hint` - when enabled, [raised_exception](Callbacks::raised_exception) will be 
+    /// - `hint` - when enabled, [raised_exception](Callbacks::raised_exception) will be
     ///   called, otherwise it is treated as a NOP. Note that the default implementation
     ///   of `exception_raised` is to panic.
-    /// 
+    ///
     /// By default, both are set to false.
     pub fn enable_hooks(&mut self, isb: bool, hint: bool) {
         self.config.hook_isb = isb;
@@ -655,12 +693,12 @@ impl<T: Callbacks> Config<T> {
 
     /// This option allows you to enable/disable cycle counting. If this is set to false,
     /// AddTicks and GetTicksRemaining are never called, and no cycle counting is done.
-    /// 
+    ///
     /// By default, this is set to true.
     pub fn cycle_counting(&mut self, enable: bool) {
         self.config.enable_cycle_counting = enable;
     }
-    
+
     /// Sets the size of the recompiled code cache.
     pub fn code_cache_size(&mut self, size: usize) {
         self.config.code_cache_size = size;
