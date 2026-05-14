@@ -34,8 +34,6 @@ jobs:
       
     - name: Build
       run: cargo build --verbose
-      working-directory: bindings
       
     - name: Run tests
       run: cargo test --verbose -- --test-threads=1
-      working-directory: bindings
