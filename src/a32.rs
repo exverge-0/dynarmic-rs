@@ -6,77 +6,77 @@ pub type VAddr = u32;
 #[repr(C)]
 struct DynarmicCallbacks<T> {
     #[cfg(not(target_env = "msvc"))]
-    pub offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks a final class, so this should always be 0 as UserCallbacks and TranslateCallbacks have no fields
+    offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks a final class, so this should always be 0 as UserCallbacks and TranslateCallbacks have no fields
     #[cfg(not(target_env = "msvc"))]
-    pub typeinfo: crate::cxx::TypeInfoPtr,
+    typeinfo: crate::cxx::TypeInfoPtr,
 
     // TranslateCallbacks
 
     // https://github.com/rust-lang/rust/issues/38258
     #[cfg(not(target_env = "msvc"))]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackImpl<T>, VAddr) -> CxxOptional<u32>,
+    memory_read_code: unsafe extern "C" fn(&CallbackImpl<T>, VAddr) -> CxxOptional<u32>,
     #[cfg(target_env = "msvc")]
-    pub memory_read_code: unsafe extern "C" fn(&CallbackImpl<T>, *mut CxxOptional<u32>, VAddr),
+    memory_read_code: unsafe extern "C" fn(&CallbackImpl<T>, *mut CxxOptional<u32>, VAddr),
 
-    pub pre_code_read_hook: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, &IREmitter) -> bool,
-    pub pre_code_translation_hook: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, &IREmitter),
-    pub get_ticks_for_code: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, u32) -> u64,
+    pre_code_read_hook: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, &IREmitter) -> bool,
+    pre_code_translation_hook: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, &IREmitter),
+    get_ticks_for_code: extern "C" fn(&mut CallbackImpl<T>, bool, VAddr, u32) -> u64,
 
     // these functions should never be called; UserCallbacks should always be owned by Rust
-    pub cpp_destructor: extern "C" fn(),
+    cpp_destructor: extern "C" fn(),
     #[cfg(not(target_env = "msvc"))]
-    pub itanium_destructor: extern "C" fn(),
+    itanium_destructor: extern "C" fn(),
 
     // UserCallbacks
-    pub memory_read_8: extern "C" fn(&CallbackImpl<T>, VAddr) -> u8,
-    pub memory_read_16: extern "C" fn(&CallbackImpl<T>, VAddr) -> u16,
-    pub memory_read_32: extern "C" fn(&CallbackImpl<T>, VAddr) -> u32,
-    pub memory_read_64: extern "C" fn(&CallbackImpl<T>, VAddr) -> u64,
-    pub memory_write_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8),
-    pub memory_write_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16),
-    pub memory_write_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32),
-    pub memory_write_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64),
-    pub memory_write_exclusive_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8, u8) -> bool,
-    pub memory_write_exclusive_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16, u16) -> bool,
-    pub memory_write_exclusive_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32, u32) -> bool,
-    pub memory_write_exclusive_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64, u64) -> bool,
+    memory_read_8: extern "C" fn(&CallbackImpl<T>, VAddr) -> u8,
+    memory_read_16: extern "C" fn(&CallbackImpl<T>, VAddr) -> u16,
+    memory_read_32: extern "C" fn(&CallbackImpl<T>, VAddr) -> u32,
+    memory_read_64: extern "C" fn(&CallbackImpl<T>, VAddr) -> u64,
+    memory_write_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8),
+    memory_write_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16),
+    memory_write_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32),
+    memory_write_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64),
+    memory_write_exclusive_8: extern "C" fn(&mut CallbackImpl<T>, VAddr, u8, u8) -> bool,
+    memory_write_exclusive_16: extern "C" fn(&mut CallbackImpl<T>, VAddr, u16, u16) -> bool,
+    memory_write_exclusive_32: extern "C" fn(&mut CallbackImpl<T>, VAddr, u32, u32) -> bool,
+    memory_write_exclusive_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64, u64) -> bool,
 
-    pub is_readonly_memory: extern "C" fn(&CallbackImpl<T>, VAddr) -> bool,
-    pub interpreter_fallback: extern "C" fn(&mut CallbackImpl<T>, VAddr, usize),
-    pub call_svc: extern "C" fn(&mut CallbackImpl<T>, u32),
-    pub exception_raised: extern "C" fn(&mut CallbackImpl<T>, VAddr, Exception),
-    pub instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackImpl<T>),
-    pub add_ticks: extern "C" fn(&mut CallbackImpl<T>, u64),
-    pub get_ticks_remaining: extern "C" fn(&CallbackImpl<T>) -> u64,
+    is_readonly_memory: extern "C" fn(&CallbackImpl<T>, VAddr) -> bool,
+    interpreter_fallback: extern "C" fn(&mut CallbackImpl<T>, VAddr, usize),
+    call_svc: extern "C" fn(&mut CallbackImpl<T>, u32),
+    exception_raised: extern "C" fn(&mut CallbackImpl<T>, VAddr, Exception),
+    instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackImpl<T>),
+    add_ticks: extern "C" fn(&mut CallbackImpl<T>, u64),
+    get_ticks_remaining: extern "C" fn(&CallbackImpl<T>) -> u64,
 }
 
 #[repr(C)]
 pub(crate) struct DynarmicConfig<T> {
-    pub callbacks: *mut CallbackImpl<T>,
-    pub processor_id: usize,
-    pub global_monitor: *mut crate::ExclusiveMonitor,
-    pub arch_version: ArchVersion,
-    pub optimizations: OptimizationFlag,
-    pub unsafe_optimizations: bool,
-    pub page_table: *mut [*mut u8; 1 << (32 - 12)],
-    pub absolute_offset_page_table: bool,
-    pub page_table_pointer_mask_bits: i32,
-    pub detect_misaligned_access_via_page_table: u8,
-    pub only_detect_misalignment_via_page_table_on_page_boundary: bool,
-    pub fastmem_pointer: CxxOptional<usize>,
-    pub recompile_on_fastmem_failure: bool,
-    pub fastmem_exclusive_access: bool,
-    pub recompile_on_exclusive_fastmem_failure: bool,
-    pub coprocessors: [CxxSharedPtr<Coprocessor>; 16],
-    pub hook_isb: bool,
-    pub hook_hint_instructions: bool,
-    pub define_unpredictable_behaviour: bool,
-    pub wall_clock_cntpct: bool,
-    pub check_halt_on_memory_access: bool,
-    pub enable_cycle_counting: bool,
-    pub always_little_endian: bool,
-    pub code_cache_size: usize,
-    pub very_verbose_debugging_output: bool,
+    callbacks: *mut CallbackImpl<T>,
+    processor_id: usize,
+    global_monitor: *mut crate::ExclusiveMonitor,
+    arch_version: ArchVersion,
+    optimizations: OptimizationFlag,
+    unsafe_optimizations: bool,
+    page_table: *mut [*mut u8; 1 << (32 - 12)],
+    absolute_offset_page_table: bool,
+    page_table_pointer_mask_bits: i32,
+    detect_misaligned_access_via_page_table: u8,
+    only_detect_misalignment_via_page_table_on_page_boundary: bool,
+    fastmem_pointer: CxxOptional<usize>,
+    recompile_on_fastmem_failure: bool,
+    fastmem_exclusive_access: bool,
+    recompile_on_exclusive_fastmem_failure: bool,
+    coprocessors: [CxxSharedPtr<Coprocessor>; 16],
+    hook_isb: bool,
+    hook_hint_instructions: bool,
+    define_unpredictable_behaviour: bool,
+    wall_clock_cntpct: bool,
+    check_halt_on_memory_access: bool,
+    enable_cycle_counting: bool,
+    always_little_endian: bool,
+    code_cache_size: usize,
+    very_verbose_debugging_output: bool,
 }
 
 #[repr(i32)]

@@ -1,6 +1,6 @@
 [package]
 name = "dynarmic"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 links = "dynarmic"
 description = "An ARM dynamic recompiler"

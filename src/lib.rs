@@ -2,8 +2,8 @@ pub mod a32;
 pub mod a64;
 pub(crate) mod cxx;
 
-pub use a32::Dynarmic as DynarmicA32;
-pub use a64::Dynarmic as DynarmicA64;
+pub type DynarmicA32<T> = a32::Dynarmic<T>;
+pub type DynarmicA64<'a, T> = a64::Dynarmic<'a, T>;
 
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
