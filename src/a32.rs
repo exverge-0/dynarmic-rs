@@ -157,6 +157,7 @@ pub enum CoprocReg {
 
 /// Callback functions that dynarmic will use to access memory and
 /// when the code calls for a higher exception level (e.g. SVC calls)
+#[allow(unused_variables)]
 pub trait Callbacks: Sized {
     /// All reads through this callback are 4-byte aligned.
     /// Memory must be interpreted as little endian.
@@ -170,10 +171,10 @@ pub trait Callbacks: Sized {
     /// in such case the callee is responsible for setting the terminal.
     // TODO: IREmitter
     extern "C" fn pre_code_read_hook(
-        _cb: &mut CallbackImpl<Self>,
-        _is_thumb: bool,
-        _pc: VAddr,
-        _ir: &IREmitter,
+        cb: &mut CallbackImpl<Self>,
+        is_thumb: bool,
+        pc: VAddr,
+        ir: &IREmitter,
     ) -> bool {
         true
     }
@@ -197,24 +198,40 @@ pub trait Callbacks: Sized {
         1
     }
 
+    /// This function is called when an emulated memory read operation is called on a virtual address.
+    ///
+    /// It will only be called once for any address if [is_readonly_memory](Self::is_readonly_memory) returns false,
+    /// and the value may be cached by dynarmic.
     extern "C" fn memory_read<T: GuestInt>(cb: &CallbackImpl<Self>, addr: VAddr) -> T;
+    /// This function is called when an emulated memory write operation on a virtual address is called.
+    ///
+    /// It will not be called if [is_readonly_memory](Self::is_readonly_memory) returns false for this address.
     extern "C" fn memory_write<T: GuestInt>(cb: &mut CallbackImpl<Self>, addr: VAddr, val: T);
+    /// This function is called when an emulated exclusive memory write operation is called. (corresponds to `STXR`, `STLXR`, etc.)
+    ///
+    /// The default implementation will do no write and always return false.
     extern "C" fn memory_write_exclusive<T: GuestInt>(
         cb: &mut CallbackImpl<Self>,
         addr: VAddr,
         val: T,
         expected: T,
-    ) -> bool;
+    ) -> bool {
+        false
+    }
 
-    /// If this callback returns true, the JIT will assume MemoryRead* callbacks will always
-    /// return the same value at any point in time for this vaddr. The JIT may use this information
+    /// This function is called when accessing a virtual memory address for the first time.
+    ///
+    /// If this callback returns true, the Jit will assume [memory_read](Self::memory_read) callbacks will always
+    /// return the same value at any point in time for this vaddr. The Jit may use this information
     /// in optimizations.
+    ///
     /// The default implementation will always return false.
     extern "C" fn is_readonly_memory(_cb: &CallbackImpl<Self>, _addr: VAddr) -> bool {
         false
     }
     /// This function is called when dynarmic doesn't have an implementation for the instruction at `pc` and `num` instructions after.
-    /// By default, this function will panic.
+    ///
+    /// The default implementation will panic.
     extern "C" fn interpreter_fallback(cb: &mut CallbackImpl<Self>, pc: VAddr, num: usize) {
         panic!(
             "dynarmic: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'",
@@ -223,14 +240,30 @@ pub trait Callbacks: Sized {
             pc
         )
     }
-    extern "C" fn raised_exception(_cb: &mut CallbackImpl<Self>, addr: VAddr, exc: Exception) {
+    /// This function is called when a dynarmic exception is called.
+    ///
+    /// # Notes
+    /// - See [crate::a64::Exception] for the different types of potential exceptions.
+    /// - Hint instructions will only be called for this function if `isb` was enabled
+    ///   in [crate::a64::Config::enable_hooks].
+    extern "C" fn raised_exception(cb: &mut CallbackImpl<Self>, addr: VAddr, exc: Exception) {
         panic!("dynarmic: Unhandled exception '{exc:?}' at '0x{addr:X}'",)
     }
     extern "C" fn call_svc(cb: &mut CallbackImpl<Self>, swi: u32);
-    extern "C" fn instruction_synchronization_barrier_raised(_cb: &mut CallbackImpl<Self>) {}
-    /// `ticks` amount of ticks have passed
+    extern "C" fn instruction_synchronization_barrier_raised(cb: &mut CallbackImpl<Self>) {}
+    /// This function is called by the JIT to determine that `tick` ticks have passed and
+    /// should be added to the tick counter.
+    ///
+    /// # Notes
+    /// - This function is only used if [Config::cycle_counting](Config::cycle_counting) was set to true.
+    /// - When the tick counter reaches 0, the guest will return.
     extern "C" fn add_ticks(cb: &mut CallbackImpl<Self>, ticks: u64);
     /// Returns the remaining amount of ticks before the program stops.
+    ///
+    /// # Notes
+    /// - This function is only used if [Config::cycle_counting](Config::cycle_counting) was set to true.
+    /// - When this function returns 0, or when dynarmic estimates that the program is over based on a past call
+    ///   to this function, the guest will return.
     extern "C" fn get_ticks_remaining(cb: &CallbackImpl<Self>) -> u64;
 }
 
@@ -592,7 +625,7 @@ impl<T: Callbacks> Config<T> {
         self.config.callbacks = cpp_cb.as_mut();
 
         Dynarmic {
-            ptr: unsafe { new_a32_jit((&mut self.config as *mut DynarmicConfig<T>).cast()) }, // safety: we're casting T, which has no effect on memory layout
+            ptr: unsafe { new_a32_jit((&mut self.config as *mut DynarmicConfig<T>).cast()) }, // SAFETY: we're casting T, which has no effect on memory layout
             cpp_cb,
             rust_cb: cb,
         }

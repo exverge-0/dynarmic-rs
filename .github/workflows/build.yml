@@ -1,4 +1,4 @@
-name: Build dynarmic-bindings
+name: Build dynarmic
 
 on:
   push:

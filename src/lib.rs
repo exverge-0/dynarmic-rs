@@ -203,12 +203,12 @@ impl ExclusiveMonitor {
         self.lock();
 
         let val = op();
-        // safety: pointer validity should be ensured by C++
+        // SAFETY: pointer validity should be ensured by C++
         unsafe {
             *self.get_addr_ptr(proc_id) = addr;
             // note that we use copy here as the original code specifically chooses
             // not to zero out the other bytes and i'm not really sure if that's on purpose
-            // safety: .cast() is safe as T can't be bigger than u128
+            // SAFETY: .cast() is safe as T can't be bigger than u128
             std::ptr::copy_nonoverlapping(&val, self.get_value_ptr(proc_id).cast(), 1);
         }
         self.unlock();
