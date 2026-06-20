@@ -42,7 +42,6 @@ struct DynarmicCallbacks<T> {
     memory_write_exclusive_64: extern "C" fn(&mut CallbackImpl<T>, VAddr, u64, u64) -> bool,
 
     is_readonly_memory: extern "C" fn(&CallbackImpl<T>, VAddr) -> bool,
-    interpreter_fallback: extern "C" fn(&mut CallbackImpl<T>, VAddr, usize),
     call_svc: extern "C" fn(&mut CallbackImpl<T>, u32),
     exception_raised: extern "C" fn(&mut CallbackImpl<T>, VAddr, Exception),
     instruction_synchronization_barrier_raised: extern "C" fn(&mut CallbackImpl<T>),
@@ -53,21 +52,23 @@ struct DynarmicCallbacks<T> {
 #[repr(C)]
 pub(crate) struct DynarmicConfig<T> {
     callbacks: *mut CallbackImpl<T>,
-    processor_id: usize,
     global_monitor: *mut crate::ExclusiveMonitor,
-    arch_version: ArchVersion,
-    optimizations: OptimizationFlag,
-    unsafe_optimizations: bool,
     page_table: *mut [*mut u8; 1 << (32 - 12)],
-    absolute_offset_page_table: bool,
-    page_table_pointer_mask_bits: i32,
-    detect_misaligned_access_via_page_table: u8,
-    only_detect_misalignment_via_page_table_on_page_boundary: bool,
+    coprocessors: [CxxSharedPtr<Coprocessor>; 16],
     fastmem_pointer: CxxOptional<usize>,
+    optimizations: OptimizationFlag,
+    code_cache_size: u32,
+    page_table_pointer_mask_bits: i32,
+    page_table_log2_stride: usize, // todo
+    arch_version: ArchVersion,
+    processor_id: u8,
+    detect_misaligned_access_via_page_table: u8,
+    unsafe_optimizations: bool,
+    absolute_offset_page_table: bool,
+    only_detect_misalignment_via_page_table_on_page_boundary: bool,
     recompile_on_fastmem_failure: bool,
     fastmem_exclusive_access: bool,
     recompile_on_exclusive_fastmem_failure: bool,
-    coprocessors: [CxxSharedPtr<Coprocessor>; 16],
     hook_isb: bool,
     hook_hint_instructions: bool,
     define_unpredictable_behaviour: bool,
@@ -75,7 +76,6 @@ pub(crate) struct DynarmicConfig<T> {
     check_halt_on_memory_access: bool,
     enable_cycle_counting: bool,
     always_little_endian: bool,
-    code_cache_size: usize,
     very_verbose_debugging_output: bool,
 }
 
@@ -229,17 +229,6 @@ pub trait Callbacks: Sized {
     extern "C" fn is_readonly_memory(_cb: &CallbackImpl<Self>, _addr: VAddr) -> bool {
         false
     }
-    /// This function is called when dynarmic doesn't have an implementation for the instruction at `pc` and `num` instructions after.
-    ///
-    /// The default implementation will panic.
-    extern "C" fn interpreter_fallback(cb: &mut CallbackImpl<Self>, pc: VAddr, num: usize) {
-        panic!(
-            "dynarmic: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'",
-            Self::memory_read::<u32>(cb, pc),
-            num,
-            pc
-        )
-    }
     /// This function is called when a dynarmic exception is called.
     ///
     /// # Notes
@@ -337,7 +326,6 @@ impl<T: Callbacks> Dynarmic<T> {
         memory_write_exclusive_32: T::memory_write_exclusive::<u32>,
         memory_write_exclusive_64: T::memory_write_exclusive::<u64>,
         is_readonly_memory: T::is_readonly_memory,
-        interpreter_fallback: T::interpreter_fallback,
         call_svc: T::call_svc,
         exception_raised: T::raised_exception,
         instruction_synchronization_barrier_raised: T::instruction_synchronization_barrier_raised,
@@ -606,6 +594,7 @@ impl<T: Callbacks> Config<T> {
                 always_little_endian: false,
                 code_cache_size: 128 * 1024 * 1024,
                 very_verbose_debugging_output: false,
+                page_table_log2_stride: 3,
             },
         }
     }
@@ -632,7 +621,7 @@ impl<T: Callbacks> Config<T> {
     }
 
     /// Sets the processor id.
-    pub fn processor_id(&mut self, id: usize) -> &mut Self {
+    pub fn processor_id(&mut self, id: u8) -> &mut Self {
         self.config.processor_id = id;
 
         self
@@ -733,7 +722,7 @@ impl<T: Callbacks> Config<T> {
     }
 
     /// Sets the size of the recompiled code cache.
-    pub fn code_cache_size(&mut self, size: usize) {
+    pub fn code_cache_size(&mut self, size: u32) {
         self.config.code_cache_size = size;
     }
 }

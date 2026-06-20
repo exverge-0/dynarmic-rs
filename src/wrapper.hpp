@@ -7,11 +7,11 @@ extern "C" {
 static_assert(sizeof(std::optional<std::uint32_t>) == 8, "Failed to verify size of type std::optional<u32>");
 static_assert(sizeof(std::optional<std::uint64_t>) == 16, "Failed to verify size of type std::optional<u64>");
 static_assert(sizeof(std::optional<std::uintptr_t>) == 16, "Failed to verify size of type std::optional<usize>");
-static_assert(sizeof(Dynarmic::A32::UserConfig) == 368, "Failed to verify size of type A32::UserConfig");
-static_assert(sizeof(Dynarmic::A64::UserConfig) == 144, "Failed to verify size of type A64::UserConfig");
+static_assert(sizeof(Dynarmic::A32::UserConfig) == 344, "Failed to verify size of type A32::UserConfig");
+static_assert(sizeof(Dynarmic::A64::UserConfig) == 120, "Failed to verify size of type A64::UserConfig");
 static_assert(sizeof(std::shared_ptr<Dynarmic::A32::Coprocessor>) == 16,
               "Failed to verify size of type std::shared_ptr");
-static_assert(sizeof(Dynarmic::ExclusiveMonitor) == 56, "Failed to verify size of type ExclusiveMonitor");
+static_assert(sizeof(Dynarmic::ExclusiveMonitor) == 104, "Failed to verify size of type ExclusiveMonitor");
 static_assert(sizeof(Dynarmic::SpinLock) == sizeof(std::int32_t), "Failed to verify size of type SpinLock");
 
 Dynarmic::HaltReason JitA32_Run(Dynarmic::A32::Jit *jit) {
@@ -202,26 +202,6 @@ void SpinLock_Lock(Dynarmic::SpinLock *lock) {
 
 void SpinLock_Unlock(Dynarmic::SpinLock *lock) {
     lock->Unlock();
-}
-
-std::uint64_t *get_vec_u64(std::vector<std::uint64_t> *vec, size_t index) {
-    return &(*vec)[index];
-}
-
-size_t size_vec_u64(std::vector<std::uint64_t> *vec) {
-    return vec->size();
-}
-
-std::uint64_t *get_vec_u128(std::vector<std::array<std::uint64_t, 2> > *vec, size_t index) {
-    return (*vec)[index].data();
-}
-
-void delete_vec_u64(std::vector<std::uint64_t> *vec) {
-    vec->~vector();
-}
-
-void delete_vec_u128(std::vector<Dynarmic::Vector> *vec) {
-    vec->~vector();
 }
 
 void new_optional_usize(std::optional<std::uintptr_t> *out, std::uintptr_t s) {

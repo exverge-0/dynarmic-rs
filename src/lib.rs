@@ -5,7 +5,6 @@ pub(crate) mod cxx;
 pub type DynarmicA32<T> = a32::Dynarmic<T>;
 pub type DynarmicA64<'a, T> = a64::Dynarmic<'a, T>;
 
-use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 
 /// Integer type used for memory reads and writes.
@@ -122,32 +121,35 @@ struct Spinlock {
 
 #[repr(C)]
 pub struct ExclusiveMonitor {
+    exclusive_addr: [a64::VAddr; 4],
+    exclusive_val: [u128; 4],
     spinlock: Spinlock,
-    exclusive_addr: cxx::CxxVector<a64::VAddr>,
-    exclusive_val: cxx::CxxVector<u128>,
+    
+    // outside of dynarmic's ExclusiveMonitor size
+    processor_count: usize,
 }
 
 impl ExclusiveMonitor {
     #[inline(always)]
     pub fn new(processor_count: usize) -> Self {
-        unsafe extern "C-unwind" {
-            fn ExclusiveMonitor_ExclusiveMonitor(
-                this: *mut ExclusiveMonitor,
-                processor_count: usize,
-            );
+        debug_assert!(processor_count < 4, "dynarmic does not support greater than 4 cores");
+        let mut exclusive_addr: [u64; 4] = [0; 4];
+        
+        for i in 0..processor_count {
+            exclusive_addr[i] = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
         }
-        let mut init = MaybeUninit::<Self>::uninit();
-        unsafe {
-            ExclusiveMonitor_ExclusiveMonitor(init.as_mut_ptr(), processor_count);
-            init.assume_init()
+        
+        Self {
+            exclusive_addr,
+            exclusive_val: [0; 4],
+            spinlock: Spinlock { storage: 0 },
+            processor_count,
         }
     }
 
     #[inline]
     pub fn clear_processor(&mut self, id: usize) {
-        unsafe {
-            *self.get_addr_ptr(id) = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
-        }
+        self.exclusive_addr[id] = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
     }
     pub fn clear(&mut self) {
         for i in 0..self.get_processor_count() {
@@ -157,28 +159,9 @@ impl ExclusiveMonitor {
 
     #[inline(always)]
     pub fn get_processor_count(&self) -> usize {
-        unsafe extern "C-unwind" {
-            fn size_vec_u64(vec: *const cxx::CxxVector<u64>) -> usize;
-        }
-        unsafe { size_vec_u64(&self.exclusive_addr) }
+        self.processor_count
     }
 
-    #[inline(always)]
-    fn get_addr_ptr(&mut self, proc: usize) -> *mut u64 {
-        debug_assert!(proc < self.get_processor_count());
-        unsafe extern "C-unwind" {
-            fn get_vec_u64(vec: *mut cxx::CxxVector<u64>, index: usize) -> *mut u64;
-        }
-        unsafe { get_vec_u64(&mut self.exclusive_addr, proc) }
-    }
-    #[inline(always)]
-    fn get_value_ptr(&mut self, proc: usize) -> *mut u128 {
-        debug_assert!(proc < self.get_processor_count());
-        unsafe extern "C-unwind" {
-            fn get_vec_u128(vec: *mut cxx::CxxVector<u64>, index: usize) -> *mut u128;
-        }
-        unsafe { get_vec_u128(&mut self.exclusive_addr, proc) }
-    }
     #[inline(always)]
     fn lock(&mut self) {
         unsafe extern "C-unwind" {
@@ -203,13 +186,12 @@ impl ExclusiveMonitor {
         self.lock();
 
         let val = op();
-        // SAFETY: pointer validity should be ensured by C++
+        self.exclusive_addr[proc_id] = addr;
         unsafe {
-            *self.get_addr_ptr(proc_id) = addr;
             // note that we use copy here as the original code specifically chooses
             // not to zero out the other bytes and i'm not really sure if that's on purpose
             // SAFETY: .cast() is safe as T can't be bigger than u128
-            std::ptr::copy_nonoverlapping(&val, self.get_value_ptr(proc_id).cast(), 1);
+            std::ptr::copy_nonoverlapping(&val, (&mut self.exclusive_val[proc_id] as *mut u128).cast(), 1);
         }
         self.unlock();
     }
@@ -229,38 +211,23 @@ impl ExclusiveMonitor {
     {
         // CheckAndClear (private function)
         self.lock();
-        if unsafe { *self.get_addr_ptr(proc_id) } != addr {
+        if self.exclusive_addr[proc_id] != addr {
             self.unlock();
             return false;
         }
 
         for i in 0..self.get_processor_count() {
-            let val = self.get_addr_ptr(i);
-            unsafe {
-                if *val == addr {
-                    *val = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
-                }
+            let val = &mut self.exclusive_addr[i];
+            if *val == addr {
+                *val = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
             }
         }
 
         // DoExclusiveOperation
-        let saved_value = unsafe { *self.get_value_ptr(proc_id).cast::<T>() };
+        let saved_value = T::from(self.exclusive_val[proc_id]).unwrap();
         let result = op(saved_value);
 
         self.unlock();
         result
-    }
-}
-
-impl Drop for ExclusiveMonitor {
-    fn drop(&mut self) {
-        unsafe extern "C-unwind" {
-            pub fn delete_vec_u64(vec: *mut cxx::CxxVector<u64>);
-            pub fn delete_vec_u128(vec: *mut cxx::CxxVector<u128>);
-        }
-        unsafe {
-            delete_vec_u64(&mut self.exclusive_addr);
-            delete_vec_u128(&mut self.exclusive_val);
-        }
     }
 }

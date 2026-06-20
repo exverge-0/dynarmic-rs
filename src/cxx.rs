@@ -1,11 +1,6 @@
 use std::mem::MaybeUninit;
 
 #[repr(C)]
-pub struct CxxVector<T: Sized> {
-    __data: [*mut T; 3],
-}
-
-#[repr(C)]
 pub struct CxxOptional<T: Sized> {
     __data: MaybeUninit<T>,
     __bool: bool,
@@ -76,11 +71,11 @@ const _: () = {
         "Failed to verify size of type std::optional<usize>"
     );
     assert!(
-        size_of::<crate::a32::DynarmicConfig<u32>>() == 368,
+        size_of::<crate::a32::DynarmicConfig<u32>>() == 344,
         "Failed to verify size of type a32::UserConfig"
     );
     assert!(
-        size_of::<crate::a64::DynarmicConfig<u32>>() == 144,
+        size_of::<crate::a64::DynarmicConfig<u32>>() == 120,
         "Failed to verify size of type a64::UserConfig"
     );
     assert!(
@@ -88,7 +83,7 @@ const _: () = {
         "Failed to verify size of type cpp_shared_ptr"
     );
     assert!(
-        size_of::<crate::ExclusiveMonitor>() == 56,
+        size_of::<crate::ExclusiveMonitor>() == 104 + size_of::<usize>(),
         "Failed to verify size of type ExclusiveMonitor"
     );
 };

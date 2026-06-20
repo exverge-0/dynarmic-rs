@@ -2,7 +2,7 @@ name: Build dynarmic
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "eden_gplv3" ]
   pull_request:
 
 env:

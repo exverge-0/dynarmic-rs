@@ -1,0 +1,154 @@
+From d4ea8c1c371b530eddf55e510c0f6282c197fd93 Mon Sep 17 00:00:00 2001
+From: Exverge <exverge@exverge.xyz>
+Date: Sat, 18 Apr 2026 11:48:34 -0400
+Subject: [PATCH 3/4] Fix cmake install issues
+
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 6fa79444..7b22a64a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -174,3 +174,30 @@ add_subdirectory(src/dynarmic)
+ if (DYNARMIC_TESTS)
+     add_subdirectory(tests)
+ endif()
++
++#
++# Install
++#
++include(GNUInstallDirs)
++include(CMakePackageConfigHelpers)
++
++install(TARGETS dynarmic unordered_dense EXPORT dynarmicTargets)
++install(EXPORT dynarmicTargets
++        NAMESPACE dynarmic::
++        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/dynarmic"
++)
++
++configure_package_config_file(CMakeModules/dynarmicConfig.cmake.in
++        dynarmicConfig.cmake
++        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/dynarmic"
++)
++write_basic_package_version_file(dynarmicConfigVersion.cmake
++        COMPATIBILITY SameMajorVersion
++)
++install(FILES
++        "${CMAKE_CURRENT_BINARY_DIR}/dynarmicConfig.cmake"
++        "${CMAKE_CURRENT_BINARY_DIR}/dynarmicConfigVersion.cmake"
++        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/dynarmic"
++)
++
++install(DIRECTORY src/dynarmic TYPE INCLUDE FILES_MATCHING PATTERN "*.h")
+\ No newline at end of file
+diff --git a/CMakeModules/dynarmicConfig.cmake.in b/CMakeModules/dynarmicConfig.cmake.in
+index a2cc861a..5469bd9c 100644
+--- a/CMakeModules/dynarmicConfig.cmake.in
++++ b/CMakeModules/dynarmicConfig.cmake.in
+@@ -7,6 +7,7 @@ set(ARCHITECTURE "@ARCHITECTURE@")
+ if (NOT @BUILD_SHARED_LIBS@)
+     find_dependency(Boost 1.57)
+     find_dependency(fmt 9)
++    find_dependency(unordered_dense)
+     find_dependency(tsl-robin-map)
+ 
+     if ("arm64" IN_LIST ARCHITECTURE)
+diff --git a/src/dynarmic/CMakeLists.txt b/src/dynarmic/CMakeLists.txt
+index 72c44775..44f3419e 100644
+--- a/src/dynarmic/CMakeLists.txt
++++ b/src/dynarmic/CMakeLists.txt
+@@ -337,30 +337,31 @@ elseif (APPLE)
+         message(STATUS "mach/mach_exc.defs location: ${MACH_EXC_DEFS_DIR}")
+         execute_process(
+             COMMAND
+-                mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig"
++                mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/x64"
+             COMMAND
+                 mig
+                 -arch x86_64
+-                -user "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_user.c"
+-                -header "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_user.h"
+-                -server "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_server.c"
+-                -sheader "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_server.h"
++                -user "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/x64/mach_exc_user.c"
++                -header "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/x64/mach_exc_user.h"
++                -server "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/x64/mach_exc_server.c"
++                -sheader "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/x64/mach_exc_server.h"
+                 "${MACH_EXC_DEFS_DIR}/mach/mach_exc.defs"
+             COMMAND_ERROR_IS_FATAL ANY
+         )
+         execute_process(
+             COMMAND
+-                mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig"
++                mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/arm64"
+             COMMAND
+                 mig
+                 -arch arm64
+-                -user "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_user.c"
+-                -header "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_user.h"
+-                -server "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_server.c"
+-                -sheader "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_server.h"
++                -user "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/arm64/mach_exc_user.c"
++                -header "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/arm64/mach_exc_user.h"
++                -server "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/arm64/mach_exc_server.c"
++                -sheader "${CMAKE_CURRENT_BINARY_DIR}/backend/mig/arm64/mach_exc_server.h"
+                 "${MACH_EXC_DEFS_DIR}/mach/mach_exc.defs"
+             COMMAND_ERROR_IS_FATAL ANY
+         )
++        target_include_directories(dynarmic PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/backend")
+         target_sources(dynarmic PRIVATE
+             backend/exception_handler_macos.cpp
+             backend/exception_handler_macos_mig.c
+@@ -383,7 +384,6 @@ target_include_directories(dynarmic PUBLIC
+     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+ )
+-target_include_directories(dynarmic PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/..")
+ set_target_properties(dynarmic PROPERTIES
+     VERSION ${dynarmic_VERSION}
+     SOVERSION ${dynarmic_VERSION_MAJOR}.${dynarmic_VERSION_MINOR}
+diff --git a/src/dynarmic/backend/exception_handler_macos.cpp b/src/dynarmic/backend/exception_handler_macos.cpp
+index 18c31a2b..90d0bf60 100644
+--- a/src/dynarmic/backend/exception_handler_macos.cpp
++++ b/src/dynarmic/backend/exception_handler_macos.cpp
+@@ -28,7 +28,7 @@
+ 
+ #    include "dynarmic/backend/x64/block_of_code.h"
+ #    define mig_external extern "C"
+-#    include "dynarmic/backend/x64/mig/mach_exc_server.h"
++#    include <mig/x64/mach_exc_server.h>
+ 
+ #    define THREAD_STATE x86_THREAD_STATE64
+ #    define THREAD_STATE_COUNT x86_THREAD_STATE64_COUNT
+@@ -39,7 +39,7 @@ using dynarmic_thread_state_t = x86_thread_state64_t;
+ 
+ #    include <oaknut/code_block.hpp>
+ #    define mig_external extern "C"
+-#    include "dynarmic/backend/arm64/mig/mach_exc_server.h"
++#    include <mig/arm64/mach_exc_server.h>
+ 
+ #    define THREAD_STATE ARM_THREAD_STATE64
+ #    define THREAD_STATE_COUNT ARM_THREAD_STATE64_COUNT
+diff --git a/src/dynarmic/backend/exception_handler_macos_mig.c b/src/dynarmic/backend/exception_handler_macos_mig.c
+index 05e9ed5b..3c5d142f 100644
+--- a/src/dynarmic/backend/exception_handler_macos_mig.c
++++ b/src/dynarmic/backend/exception_handler_macos_mig.c
+@@ -3,12 +3,12 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#include "dynarmic/mcl/architecture.hpp"
++#include <dynarmic/mcl/architecture.hpp>
+ 
+-#if defined(MCL_ARCHITECTURE_x86_64)
+-#    include "dynarmic/backend/x64/mig/mach_exc_server.c"
++#if defined(MCL_ARCHITECTURE_X86_64)
++#    include <mig/x64/mach_exc_server.c>
+ #elif defined(MCL_ARCHITECTURE_ARM64)
+-#    include "dynarmic/backend/arm64/mig/mach_exc_server.c"
++#    include <mig/arm64/mach_exc_server.c>
+ #else
+ #    error "Invalid architecture"
+ #endif
+-- 
+2.54.0
+

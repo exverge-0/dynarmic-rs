@@ -1,0 +1,73 @@
+From a941cec950b16c511b3f27a443f369cf16d62c76 Mon Sep 17 00:00:00 2001
+From: Exverge <exverge@exverge.xyz>
+Date: Tue, 14 Apr 2026 21:26:02 -0400
+Subject: [PATCH 2/4] Don't generate mig in source dir
+
+
+diff --git a/.gitignore b/.gitignore
+index 4dc28a88..e167d4b7 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,9 +4,6 @@ build-*/
+ cmake-build-*/
+ .idea/
+ docs/Doxygen/
+-# Generated files
+-src/dynarmic/backend/arm64/mig/
+-src/dynarmic/backend/x64/mig/
+ # System files
+ .DS_Store
+ .vscode
+diff --git a/src/dynarmic/CMakeLists.txt b/src/dynarmic/CMakeLists.txt
+index bc79b7cd..72c44775 100644
+--- a/src/dynarmic/CMakeLists.txt
++++ b/src/dynarmic/CMakeLists.txt
+@@ -337,27 +337,27 @@ elseif (APPLE)
+         message(STATUS "mach/mach_exc.defs location: ${MACH_EXC_DEFS_DIR}")
+         execute_process(
+             COMMAND
+-                mkdir -p "${CMAKE_CURRENT_SOURCE_DIR}/backend/x64/mig"
++                mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig"
+             COMMAND
+                 mig
+                 -arch x86_64
+-                -user "${CMAKE_CURRENT_SOURCE_DIR}/backend/x64/mig/mach_exc_user.c"
+-                -header "${CMAKE_CURRENT_SOURCE_DIR}/backend/x64/mig/mach_exc_user.h"
+-                -server "${CMAKE_CURRENT_SOURCE_DIR}/backend/x64/mig/mach_exc_server.c"
+-                -sheader "${CMAKE_CURRENT_SOURCE_DIR}/backend/x64/mig/mach_exc_server.h"
++                -user "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_user.c"
++                -header "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_user.h"
++                -server "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_server.c"
++                -sheader "${CMAKE_CURRENT_BINARY_DIR}/backend/x64/mig/mach_exc_server.h"
+                 "${MACH_EXC_DEFS_DIR}/mach/mach_exc.defs"
+             COMMAND_ERROR_IS_FATAL ANY
+         )
+         execute_process(
+             COMMAND
+-                mkdir -p "${CMAKE_CURRENT_SOURCE_DIR}/backend/arm64/mig"
++                mkdir -p "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig"
+             COMMAND
+                 mig
+                 -arch arm64
+-                -user "${CMAKE_CURRENT_SOURCE_DIR}/backend/arm64/mig/mach_exc_user.c"
+-                -header "${CMAKE_CURRENT_SOURCE_DIR}/backend/arm64/mig/mach_exc_user.h"
+-                -server "${CMAKE_CURRENT_SOURCE_DIR}/backend/arm64/mig/mach_exc_server.c"
+-                -sheader "${CMAKE_CURRENT_SOURCE_DIR}/backend/arm64/mig/mach_exc_server.h"
++                -user "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_user.c"
++                -header "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_user.h"
++                -server "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_server.c"
++                -sheader "${CMAKE_CURRENT_BINARY_DIR}/backend/arm64/mig/mach_exc_server.h"
+                 "${MACH_EXC_DEFS_DIR}/mach/mach_exc.defs"
+             COMMAND_ERROR_IS_FATAL ANY
+         )
+@@ -383,6 +383,7 @@ target_include_directories(dynarmic PUBLIC
+     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+ )
++target_include_directories(dynarmic PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/..")
+ set_target_properties(dynarmic PROPERTIES
+     VERSION ${dynarmic_VERSION}
+     SOVERSION ${dynarmic_VERSION_MAJOR}.${dynarmic_VERSION_MINOR}
+-- 
+2.54.0
+

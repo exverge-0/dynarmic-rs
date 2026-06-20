@@ -41,7 +41,6 @@ struct DynarmicCallbacks<T> {
     memory_write_exclusive_128: extern "C" fn(&mut CallbackImpl<T>, VAddr, u128, u128) -> bool,
 
     is_readonly_memory: extern "C" fn(&CallbackImpl<T>, VAddr) -> bool,
-    interpreter_fallback: extern "C" fn(&mut CallbackImpl<T>, VAddr, usize),
     call_svc: extern "C" fn(&mut CallbackImpl<T>, u32),
     exception_raised: extern "C" fn(&mut CallbackImpl<T>, VAddr, Exception),
     data_cache_operation_raised: extern "C" fn(&mut CallbackImpl<T>, DataCacheOperation, VAddr),
@@ -55,29 +54,31 @@ struct DynarmicCallbacks<T> {
 
 #[repr(C)]
 pub(crate) struct DynarmicConfig<T> {
+    fastmem_pointer: crate::cxx::CxxOptional<usize>,
     callbacks: *mut CallbackImpl<T>,
-    processor_id: usize,
     global_monitor: *mut crate::ExclusiveMonitor,
+    tpidrro_el0: *mut std::ffi::c_void,
+    tpidr_el0: *mut std::ffi::c_void,
+    page_table: *mut *mut std::ffi::c_void,
     optimizations: OptimizationFlag,
+    page_table_address_space_bits: u32,
+    page_table_pointer_mask_bits: i32,
+    page_table_log2_stride: usize, // todo
+    cntfrq_el0: u32,
+    ctr_el0: u32,
+    dczid_el0: u32,
+    fastmem_address_space_bits: u32,
+    code_cache_size: u32,
+    detect_misaligned_access_via_page_table: u8,
+    processor_id: u8,
     unsafe_optimizations: bool,
     hook_data_cache_operations: bool,
     hook_isb: bool,
     hook_hint_instructions: bool,
-    cntfrq_el0: u32,
-    ctr_el0: u32,
-    dczid_el0: u32,
-    tpidrro_el0: *mut std::ffi::c_void,
-    tpidr_el0: *mut std::ffi::c_void,
-    page_table: *mut *mut std::ffi::c_void,
-    page_table_address_space_bits: usize,
-    page_table_pointer_mask_bits: std::os::raw::c_int,
     silently_mirror_page_table: bool,
     absolute_offset_page_table: bool,
-    detect_misaligned_access_via_page_table: u8,
     only_detect_misalignment_via_page_table_on_page_boundary: bool,
-    fastmem_pointer: crate::cxx::CxxOptional<usize>,
     recompile_on_fastmem_failure: bool,
-    fastmem_address_space_bits: usize,
     silently_mirror_fastmem: bool,
     fastmem_exclusive_access: bool,
     recompile_on_exclusive_fastmem_failure: bool,
@@ -85,7 +86,6 @@ pub(crate) struct DynarmicConfig<T> {
     wall_clock_cntpct: bool,
     check_halt_on_memory_access: bool,
     enable_cycle_counting: bool,
-    code_cache_size: usize,
     very_verbose_debugging_output: bool,
 }
 
@@ -196,17 +196,6 @@ pub trait Callbacks: Sized {
     extern "C" fn is_readonly_memory(cb: &CallbackImpl<Self>, addr: VAddr) -> bool {
         false
     }
-    /// This function is called when dynarmic doesn't have an implementation for the instruction at `pc` and `num` instructions after.
-    /// 
-    /// The default implementation will panic.
-    extern "C" fn interpreter_fallback(cb: &mut CallbackImpl<Self>, pc: VAddr, num: usize) {
-        panic!(
-            "dynarmic: Unhandled instruction '0x{:X}' for '{}' instructions at '0x{:X}'",
-            Self::memory_read::<u32>(cb, pc),
-            num,
-            pc
-        )
-    }
     /// This function is called when a dynarmic exception is called.
     /// 
     /// # Notes
@@ -314,7 +303,6 @@ impl<'a, T: Callbacks> Dynarmic<'a, T> {
         memory_write_exclusive_64: T::memory_write_exclusive::<u64>,
         memory_write_exclusive_128: T::memory_write_exclusive::<u128>,
         is_readonly_memory: T::is_readonly_memory,
-        interpreter_fallback: T::interpreter_fallback,
         call_svc: T::call_svc,
         exception_raised: T::raised_exception,
         data_cache_operation_raised: T::data_cache_operation_raised,
@@ -663,6 +651,7 @@ impl<'a, T: Callbacks> Config<'a, T> {
                 enable_cycle_counting: true,
                 code_cache_size: 128 * 1024 * 1024,
                 very_verbose_debugging_output: false,
+                page_table_log2_stride: 3,
             },
             tpidr_el0: None,
             tpidrro_el0: None,
@@ -698,7 +687,7 @@ impl<'a, T: Callbacks> Config<'a, T> {
     }
 
     /// Sets the processor id.
-    pub fn processor_id(&mut self, id: usize) -> &mut Self {
+    pub fn processor_id(&mut self, id: u8) -> &mut Self {
         self.config.processor_id = id;
 
         self
@@ -720,7 +709,7 @@ impl<'a, T: Callbacks> Config<'a, T> {
     pub unsafe fn fastmem(
         &mut self,
         ptr: *mut std::ffi::c_void,
-        address_space_bits: usize,
+        address_space_bits: u32,
         recompile_on_fault: bool,
         silently_mirror: bool,
     ) -> &mut Self {
@@ -868,7 +857,7 @@ impl<'a, T: Callbacks> Config<'a, T> {
     pub unsafe fn page_table(
         &mut self,
         table: *mut *mut std::ffi::c_void,
-        address_space_bits: usize,
+        address_space_bits: u32,
         silently_mirror: bool,
     ) -> &mut Self {
         self.config.page_table = table;
@@ -900,7 +889,7 @@ impl<'a, T: Callbacks> Config<'a, T> {
     }
 
     /// Sets the size of the recompiled code cache.
-    pub fn code_cache_size(&mut self, size: usize) -> &mut Self {
+    pub fn code_cache_size(&mut self, size: u32) -> &mut Self {
         self.config.code_cache_size = size;
 
         self

@@ -179,7 +179,7 @@ mod a64 {
     #[test]
     fn a64_fastmem() {
         unsafe {
-            static address_width: usize = 12;
+            static address_width: u32 = 12;
             static memory_size: usize = 1 << address_width; // 4K
             static page_size: usize = 4 * 1024;
             static buffer_size: usize = 2 * page_size; // buffer size is 2x for alignment?

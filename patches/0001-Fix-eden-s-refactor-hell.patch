@@ -1,0 +1,1713 @@
+From 145b13dfd7029f315420f4e08773bd6ff15f0466 Mon Sep 17 00:00:00 2001
+From: Exverge <exverge@exverge.xyz>
+Date: Sat, 20 Jun 2026 14:07:34 -0400
+Subject: [PATCH 1/4] Fix eden's refactor hell
+
+
+diff --git a/CMakeModules/impl/TargetArchitectureSpecificSourcesWrapFile.cmake b/CMakeModules/impl/TargetArchitectureSpecificSourcesWrapFile.cmake
+index b9b30155..ee8bb870 100644
+--- a/CMakeModules/impl/TargetArchitectureSpecificSourcesWrapFile.cmake
++++ b/CMakeModules/impl/TargetArchitectureSpecificSourcesWrapFile.cmake
+@@ -1,3 +1,3 @@
+ string(TOUPPER "${arch}" arch)
+ file(READ "${input_file}" f_contents)
+-file(WRITE "${output_file}" "#if defined(ARCHITECTURE_${arch})\n${f_contents}\n#endif\n")
++file(WRITE "${output_file}" "#include <dynarmic/mcl/architecture.hpp>\n #if defined(MCL_ARCHITECTURE_${arch})\n${f_contents}\n#endif\n")
+diff --git a/src/dynarmic/CMakeLists.txt b/src/dynarmic/CMakeLists.txt
+index 98fcea63..bc79b7cd 100644
+--- a/src/dynarmic/CMakeLists.txt
++++ b/src/dynarmic/CMakeLists.txt
+@@ -3,6 +3,9 @@
+ include(TargetArchitectureSpecificSources)
+ 
+ add_library(dynarmic STATIC
++    mcl/architecture.hpp
++    mcl/assert.cpp
++    mcl/assert.hpp
+     mcl/bit.hpp
+     mcl/function_info.hpp
+     mcl/integer_of_size.hpp
+diff --git a/src/dynarmic/backend/arm64/a32_interface.cpp b/src/dynarmic/backend/arm64/a32_interface.cpp
+index d16a3427..bdc77e63 100644
+--- a/src/dynarmic/backend/arm64/a32_interface.cpp
++++ b/src/dynarmic/backend/arm64/a32_interface.cpp
+@@ -10,7 +10,7 @@
+ #include <mutex>
+ 
+ #include <boost/icl/interval_set.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/backend/arm64/a32_address_space.h"
+diff --git a/src/dynarmic/backend/arm64/a64_interface.cpp b/src/dynarmic/backend/arm64/a64_interface.cpp
+index b230f455..062e0e79 100644
+--- a/src/dynarmic/backend/arm64/a64_interface.cpp
++++ b/src/dynarmic/backend/arm64/a64_interface.cpp
+@@ -10,7 +10,7 @@
+ #include <mutex>
+ 
+ #include <boost/icl/interval_set.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/backend/arm64/a64_address_space.h"
+diff --git a/src/dynarmic/backend/arm64/abi.h b/src/dynarmic/backend/arm64/abi.h
+index 5eb7a27f..c4054dd6 100644
+--- a/src/dynarmic/backend/arm64/abi.h
++++ b/src/dynarmic/backend/arm64/abi.h
+@@ -11,7 +11,7 @@
+ #include <initializer_list>
+ 
+ #include "dynarmic/common/common_types.h"
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include <oaknut/oaknut.hpp>
+ 
+ 
+diff --git a/src/dynarmic/backend/arm64/exclusive_monitor.cpp b/src/dynarmic/backend/arm64/exclusive_monitor.cpp
+index 7bf93814..5c16988f 100644
+--- a/src/dynarmic/backend/arm64/exclusive_monitor.cpp
++++ b/src/dynarmic/backend/arm64/exclusive_monitor.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <algorithm>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ namespace Dynarmic {
+ 
+diff --git a/src/dynarmic/backend/arm64/reg_alloc.cpp b/src/dynarmic/backend/arm64/reg_alloc.cpp
+index 6beca6d3..c660536f 100644
+--- a/src/dynarmic/backend/arm64/reg_alloc.cpp
++++ b/src/dynarmic/backend/arm64/reg_alloc.cpp
+@@ -12,7 +12,7 @@
+ #include <array>
+ #include <iterator>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include <bit>
+ #include "dynarmic/common/common_types.h"
+diff --git a/src/dynarmic/backend/arm64/reg_alloc.h b/src/dynarmic/backend/arm64/reg_alloc.h
+index b3026ebd..f8de227e 100644
+--- a/src/dynarmic/backend/arm64/reg_alloc.h
++++ b/src/dynarmic/backend/arm64/reg_alloc.h
+@@ -14,7 +14,7 @@
+ #include <utility>
+ #include <vector>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/is_instance_of_template.hpp"
+ #include <oaknut/oaknut.hpp>
+diff --git a/src/dynarmic/backend/exception_handler.h b/src/dynarmic/backend/exception_handler.h
+index c83ac290..87352727 100644
+--- a/src/dynarmic/backend/exception_handler.h
++++ b/src/dynarmic/backend/exception_handler.h
+@@ -12,13 +12,14 @@
+ #include <memory>
+ #include <optional>
+ 
++#include "dynarmic/mcl/architecture.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ namespace Dynarmic::Backend::X64 {
+ class BlockOfCode;
+ }  // namespace Dynarmic::Backend::X64
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ namespace oaknut {
+ class CodeBlock;
+ }  // namespace oaknut
+@@ -36,12 +37,12 @@ class CodeBlock;
+ 
+ namespace Dynarmic::Backend {
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ struct FakeCall {
+     u64 call_rip;
+     u64 ret_rip;
+ };
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ struct FakeCall {
+     u64 call_pc;
+ };
+@@ -62,9 +63,9 @@ public:
+     ExceptionHandler();
+     ~ExceptionHandler();
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+     void Register(X64::BlockOfCode& code);
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+     void Register(oaknut::CodeBlock& mem, std::size_t mem_size);
+ #elif defined(ARCHITECTURE_riscv64)
+     void Register(RV64::CodeBlock& mem, std::size_t mem_size);
+diff --git a/src/dynarmic/backend/exception_handler_generic.cpp b/src/dynarmic/backend/exception_handler_generic.cpp
+index f19fe98a..50e9998e 100644
+--- a/src/dynarmic/backend/exception_handler_generic.cpp
++++ b/src/dynarmic/backend/exception_handler_generic.cpp
+@@ -16,11 +16,11 @@ struct ExceptionHandler::Impl final {
+ ExceptionHandler::ExceptionHandler() = default;
+ ExceptionHandler::~ExceptionHandler() = default;
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ void ExceptionHandler::Register(X64::BlockOfCode&) {
+     // Do nothing
+ }
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ void ExceptionHandler::Register(oaknut::CodeBlock&, std::size_t) {
+     // Do nothing
+ }
+diff --git a/src/dynarmic/backend/exception_handler_macos.cpp b/src/dynarmic/backend/exception_handler_macos.cpp
+index be44207f..18c31a2b 100644
+--- a/src/dynarmic/backend/exception_handler_macos.cpp
++++ b/src/dynarmic/backend/exception_handler_macos.cpp
+@@ -19,12 +19,12 @@
+ #include <bit>
+ 
+ #include <fmt/format.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/backend/exception_handler.h"
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ 
+ #    include "dynarmic/backend/x64/block_of_code.h"
+ #    define mig_external extern "C"
+@@ -35,7 +35,7 @@
+ 
+ using dynarmic_thread_state_t = x86_thread_state64_t;
+ 
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ 
+ #    include <oaknut/code_block.hpp>
+ #    define mig_external extern "C"
+@@ -130,7 +130,7 @@ void MachHandler::MessagePump() {
+     }
+ }
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ kern_return_t MachHandler::HandleRequest(x86_thread_state64_t* ts) {
+     std::lock_guard<std::mutex> guard(code_block_infos_mutex);
+ 
+@@ -148,7 +148,7 @@ kern_return_t MachHandler::HandleRequest(x86_thread_state64_t* ts) {
+ 
+     return KERN_SUCCESS;
+ }
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ kern_return_t MachHandler::HandleRequest(arm_thread_state64_t* ts) {
+     std::lock_guard<std::mutex> guard(code_block_infos_mutex);
+ 
+@@ -266,13 +266,13 @@ private:
+ ExceptionHandler::ExceptionHandler() = default;
+ ExceptionHandler::~ExceptionHandler() = default;
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ void ExceptionHandler::Register(X64::BlockOfCode& code) {
+     const u64 code_begin = std::bit_cast<u64>(code.getCode());
+     const u64 code_end = code_begin + code.GetTotalCodeSize();
+     impl = std::make_unique<Impl>(code_begin, code_end);
+ }
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ void ExceptionHandler::Register(oaknut::CodeBlock& mem, std::size_t size) {
+     const u64 code_begin = std::bit_cast<u64>(mem.ptr());
+     const u64 code_end = code_begin + size;
+diff --git a/src/dynarmic/backend/exception_handler_macos_mig.c b/src/dynarmic/backend/exception_handler_macos_mig.c
+index ebbe5a07..05e9ed5b 100644
+--- a/src/dynarmic/backend/exception_handler_macos_mig.c
++++ b/src/dynarmic/backend/exception_handler_macos_mig.c
+@@ -3,9 +3,11 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#include "dynarmic/mcl/architecture.hpp"
++
++#if defined(MCL_ARCHITECTURE_x86_64)
+ #    include "dynarmic/backend/x64/mig/mach_exc_server.c"
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ #    include "dynarmic/backend/arm64/mig/mach_exc_server.c"
+ #else
+ #    error "Invalid architecture"
+diff --git a/src/dynarmic/backend/exception_handler_posix.cpp b/src/dynarmic/backend/exception_handler_posix.cpp
+index 5e7a8363..09accc66 100644
+--- a/src/dynarmic/backend/exception_handler_posix.cpp
++++ b/src/dynarmic/backend/exception_handler_posix.cpp
+@@ -21,13 +21,13 @@
+ #include <fmt/format.h>
+ #include <sys/mman.h>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/backend/exception_handler.h"
+ #include "dynarmic/common/context.h"
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ #    include "dynarmic/backend/x64/block_of_code.h"
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ #    include <oaknut/code_block.hpp>
+ #    include "dynarmic/backend/arm64/abi.h"
+ #elif defined(ARCHITECTURE_riscv64)
+@@ -125,7 +125,7 @@ void RegisterHandler() {
+ void SigHandler::SigAction(int sig, siginfo_t* info, void* raw_context) {
+     DEBUG_ASSERT(sig == SIGSEGV || sig == SIGBUS);
+     CTX_DECLARE(raw_context);
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+     {
+         std::shared_lock guard(sig_handler->code_block_infos_mutex);
+         if (auto const iter = sig_handler->FindCodeBlockInfo(CTX_PC); iter != sig_handler->code_block_infos.end()) {
+@@ -137,7 +137,7 @@ void SigHandler::SigAction(int sig, siginfo_t* info, void* raw_context) {
+         }
+     }
+     fmt::print(stderr, "Unhandled {} at rip {:#018x}\n", sig == SIGSEGV ? "SIGSEGV" : "SIGBUS", CTX_PC);
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+     {
+         std::shared_lock guard(sig_handler->code_block_infos_mutex);
+         if (const auto iter = sig_handler->FindCodeBlockInfo(CTX_PC); iter != sig_handler->code_block_infos.end()) {
+@@ -214,11 +214,11 @@ private:
+ ExceptionHandler::ExceptionHandler() = default;
+ ExceptionHandler::~ExceptionHandler() = default;
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ void ExceptionHandler::Register(X64::BlockOfCode& code) {
+     impl = std::make_unique<Impl>(std::bit_cast<u64>(code.getCode()), code.GetTotalCodeSize());
+ }
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ void ExceptionHandler::Register(oaknut::CodeBlock& mem, std::size_t size) {
+     impl = std::make_unique<Impl>(std::bit_cast<u64>(mem.ptr()), size);
+ }
+diff --git a/src/dynarmic/backend/exception_handler_windows.cpp b/src/dynarmic/backend/exception_handler_windows.cpp
+index 8b524379..29f08b69 100644
+--- a/src/dynarmic/backend/exception_handler_windows.cpp
++++ b/src/dynarmic/backend/exception_handler_windows.cpp
+@@ -6,9 +6,9 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ #    include "dynarmic/backend/x64/exception_handler_windows.cpp"
+-#elif defined(ARCHITECTURE_arm64)
++#elif defined(MCL_ARCHITECTURE_ARM64)
+ #    include "dynarmic/backend/exception_handler_generic.cpp"
+ #else
+ #    error "Invalid architecture"
+diff --git a/src/dynarmic/backend/loongarch64/a32_address_space.cpp b/src/dynarmic/backend/loongarch64/a32_address_space.cpp
+index 05aeee7a..1401928c 100644
+--- a/src/dynarmic/backend/loongarch64/a32_address_space.cpp
++++ b/src/dynarmic/backend/loongarch64/a32_address_space.cpp
+@@ -3,7 +3,7 @@
+ 
+ #include "dynarmic/backend/loongarch64/a32_address_space.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/backend/loongarch64/a32_jitstate.h"
+ #include "dynarmic/backend/loongarch64/abi.h"
+diff --git a/src/dynarmic/backend/loongarch64/a32_interface.cpp b/src/dynarmic/backend/loongarch64/a32_interface.cpp
+index 5556b5d7..03be8201 100644
+--- a/src/dynarmic/backend/loongarch64/a32_interface.cpp
++++ b/src/dynarmic/backend/loongarch64/a32_interface.cpp
+@@ -5,7 +5,7 @@
+ #include <mutex>
+ 
+ #include <boost/icl/interval_set.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/backend/loongarch64/a32_address_space.h"
+diff --git a/src/dynarmic/backend/loongarch64/a64_interface.cpp b/src/dynarmic/backend/loongarch64/a64_interface.cpp
+index c2c92e9c..8c7f833d 100644
+--- a/src/dynarmic/backend/loongarch64/a64_interface.cpp
++++ b/src/dynarmic/backend/loongarch64/a64_interface.cpp
+@@ -6,7 +6,7 @@
+ #include <string>
+ #include <utility>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/interface/A64/a64.h"
+ 
+diff --git a/src/dynarmic/backend/loongarch64/code_block.h b/src/dynarmic/backend/loongarch64/code_block.h
+index fa88d21d..275e1a4b 100644
+--- a/src/dynarmic/backend/loongarch64/code_block.h
++++ b/src/dynarmic/backend/loongarch64/code_block.h
+@@ -10,7 +10,7 @@
+ #include <sys/mman.h>
+ #include "dynarmic/backend/loongarch64/lagoon_cpp.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ namespace Dynarmic::Backend::LoongArch64 {
+diff --git a/src/dynarmic/backend/loongarch64/reg_alloc.cpp b/src/dynarmic/backend/loongarch64/reg_alloc.cpp
+index f0600e2f..dd5f6f43 100644
+--- a/src/dynarmic/backend/loongarch64/reg_alloc.cpp
++++ b/src/dynarmic/backend/loongarch64/reg_alloc.cpp
+@@ -9,7 +9,7 @@
+ 
+ #include "dynarmic/backend/loongarch64/lagoon_cpp.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/common/always_false.h"
+diff --git a/src/dynarmic/backend/loongarch64/reg_alloc.h b/src/dynarmic/backend/loongarch64/reg_alloc.h
+index f2553e21..201ef0bc 100644
+--- a/src/dynarmic/backend/loongarch64/reg_alloc.h
++++ b/src/dynarmic/backend/loongarch64/reg_alloc.h
+@@ -11,7 +11,7 @@
+ #include "dynarmic/backend/loongarch64/lagoon_cpp.h"
+ #include <ankerl/unordered_dense.h>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/is_instance_of_template.hpp"
+ 
+diff --git a/src/dynarmic/backend/riscv64/a32_address_space.cpp b/src/dynarmic/backend/riscv64/a32_address_space.cpp
+index edb24761..a9180135 100644
+--- a/src/dynarmic/backend/riscv64/a32_address_space.cpp
++++ b/src/dynarmic/backend/riscv64/a32_address_space.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/backend/riscv64/a32_address_space.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/backend/riscv64/abi.h"
+ #include "dynarmic/backend/riscv64/emit_riscv64.h"
+diff --git a/src/dynarmic/backend/riscv64/a32_interface.cpp b/src/dynarmic/backend/riscv64/a32_interface.cpp
+index fc3400da..b28e95fd 100644
+--- a/src/dynarmic/backend/riscv64/a32_interface.cpp
++++ b/src/dynarmic/backend/riscv64/a32_interface.cpp
+@@ -10,7 +10,7 @@
+ #include <mutex>
+ 
+ #include <boost/icl/interval_set.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/backend/riscv64/a32_address_space.h"
+diff --git a/src/dynarmic/backend/riscv64/a64_interface.cpp b/src/dynarmic/backend/riscv64/a64_interface.cpp
+index c900d76e..c2f0884d 100644
+--- a/src/dynarmic/backend/riscv64/a64_interface.cpp
++++ b/src/dynarmic/backend/riscv64/a64_interface.cpp
+@@ -5,7 +5,7 @@
+ #include <mutex>
+ 
+ #include <boost/icl/interval_set.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/frontend/A64/a64_location_descriptor.h"
+diff --git a/src/dynarmic/backend/riscv64/code_block.h b/src/dynarmic/backend/riscv64/code_block.h
+index 27cab3a0..5e954330 100644
+--- a/src/dynarmic/backend/riscv64/code_block.h
++++ b/src/dynarmic/backend/riscv64/code_block.h
+@@ -13,7 +13,7 @@
+ 
+ #include <sys/mman.h>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ namespace Dynarmic::Backend::RV64 {
+diff --git a/src/dynarmic/backend/riscv64/reg_alloc.cpp b/src/dynarmic/backend/riscv64/reg_alloc.cpp
+index 4af84b90..195c2169 100644
+--- a/src/dynarmic/backend/riscv64/reg_alloc.cpp
++++ b/src/dynarmic/backend/riscv64/reg_alloc.cpp
+@@ -11,7 +11,7 @@
+ #include <algorithm>
+ #include <array>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/common/always_false.h"
+diff --git a/src/dynarmic/backend/riscv64/reg_alloc.h b/src/dynarmic/backend/riscv64/reg_alloc.h
+index be826e63..89636154 100644
+--- a/src/dynarmic/backend/riscv64/reg_alloc.h
++++ b/src/dynarmic/backend/riscv64/reg_alloc.h
+@@ -16,7 +16,7 @@
+ 
+ #include <biscuit/assembler.hpp>
+ #include <biscuit/registers.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/is_instance_of_template.hpp"
+ #include <ankerl/unordered_dense.h>
+diff --git a/src/dynarmic/backend/x64/a32_emit_x64.cpp b/src/dynarmic/backend/x64/a32_emit_x64.cpp
+index dd9e9e4a..98d9be6a 100644
+--- a/src/dynarmic/backend/x64/a32_emit_x64.cpp
++++ b/src/dynarmic/backend/x64/a32_emit_x64.cpp
+@@ -14,7 +14,7 @@
+ 
+ #include <fmt/format.h>
+ #include <fmt/ostream.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include <boost/container/static_vector.hpp>
+diff --git a/src/dynarmic/backend/x64/a32_interface.cpp b/src/dynarmic/backend/x64/a32_interface.cpp
+index b48dcf90..59e7e5fe 100644
+--- a/src/dynarmic/backend/x64/a32_interface.cpp
++++ b/src/dynarmic/backend/x64/a32_interface.cpp
+@@ -12,7 +12,7 @@
+ 
+ #include <boost/icl/interval_set.hpp>
+ #include <fmt/format.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include <bit>
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/common/llvm_disassemble.h"
+diff --git a/src/dynarmic/backend/x64/a32_jitstate.cpp b/src/dynarmic/backend/x64/a32_jitstate.cpp
+index 066b9313..cb34e5e6 100644
+--- a/src/dynarmic/backend/x64/a32_jitstate.cpp
++++ b/src/dynarmic/backend/x64/a32_jitstate.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/backend/x64/a32_jitstate.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/backend/x64/a64_emit_x64.cpp b/src/dynarmic/backend/x64/a64_emit_x64.cpp
+index 1e14193e..b882504b 100644
+--- a/src/dynarmic/backend/x64/a64_emit_x64.cpp
++++ b/src/dynarmic/backend/x64/a64_emit_x64.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <fmt/format.h>
+ #include <fmt/ostream.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/integer_of_size.hpp"
+ #include <boost/container/static_vector.hpp>
+diff --git a/src/dynarmic/backend/x64/a64_interface.cpp b/src/dynarmic/backend/x64/a64_interface.cpp
+index 96440d27..cae53fd2 100644
+--- a/src/dynarmic/backend/x64/a64_interface.cpp
++++ b/src/dynarmic/backend/x64/a64_interface.cpp
+@@ -11,7 +11,7 @@
+ #include <mutex>
+ 
+ #include <boost/icl/interval_set.hpp>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/fp/fpcr.h"
+ #include "dynarmic/common/llvm_disassemble.h"
+ #include <bit>
+diff --git a/src/dynarmic/backend/x64/block_of_code.cpp b/src/dynarmic/backend/x64/block_of_code.cpp
+index 3a161fca..1505c9b2 100644
+--- a/src/dynarmic/backend/x64/block_of_code.cpp
++++ b/src/dynarmic/backend/x64/block_of_code.cpp
+@@ -24,7 +24,7 @@
+ #include <array>
+ #include <cstring>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/backend/x64/xbyak.h"
+ 
+diff --git a/src/dynarmic/backend/x64/block_of_code.h b/src/dynarmic/backend/x64/block_of_code.h
+index 292ca6a2..c9d5fe81 100644
+--- a/src/dynarmic/backend/x64/block_of_code.h
++++ b/src/dynarmic/backend/x64/block_of_code.h
+@@ -14,7 +14,6 @@
+ #include <type_traits>
+ 
+ #include "dynarmic/common/common_types.h"
+-#include "dynarmic/common/x64/xbyak.h"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/backend/x64/xbyak.h"
+ #include "dynarmic/backend/x64/abi.h"
+diff --git a/src/dynarmic/backend/x64/constant_pool.cpp b/src/dynarmic/backend/x64/constant_pool.cpp
+index f0c67546..ba13eb09 100644
+--- a/src/dynarmic/backend/x64/constant_pool.cpp
++++ b/src/dynarmic/backend/x64/constant_pool.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include <cstring>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/backend/x64/block_of_code.h"
+ #include "dynarmic/backend/x64/constant_pool.h"
+diff --git a/src/dynarmic/backend/x64/emit_x64.cpp b/src/dynarmic/backend/x64/emit_x64.cpp
+index 4ed198e0..18364fba 100644
+--- a/src/dynarmic/backend/x64/emit_x64.cpp
++++ b/src/dynarmic/backend/x64/emit_x64.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <iterator>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include <boost/variant/detail/apply_visitor_binary.hpp>
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+diff --git a/src/dynarmic/backend/x64/emit_x64_data_processing.cpp b/src/dynarmic/backend/x64/emit_x64_data_processing.cpp
+index 38e107fb..354a2c67 100644
+--- a/src/dynarmic/backend/x64/emit_x64_data_processing.cpp
++++ b/src/dynarmic/backend/x64/emit_x64_data_processing.cpp
+@@ -9,7 +9,7 @@
+ #include <cstddef>
+ #include <type_traits>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/backend/x64/block_of_code.h"
+diff --git a/src/dynarmic/backend/x64/emit_x64_floating_point.cpp b/src/dynarmic/backend/x64/emit_x64_floating_point.cpp
+index 275d0cfb..217cb66e 100644
+--- a/src/dynarmic/backend/x64/emit_x64_floating_point.cpp
++++ b/src/dynarmic/backend/x64/emit_x64_floating_point.cpp
+@@ -10,7 +10,7 @@
+ #include <type_traits>
+ #include <utility>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/integer_of_size.hpp"
+ #include "dynarmic/backend/x64/xbyak.h"
+diff --git a/src/dynarmic/backend/x64/emit_x64_saturation.cpp b/src/dynarmic/backend/x64/emit_x64_saturation.cpp
+index 1fbb05c1..179d9329 100644
+--- a/src/dynarmic/backend/x64/emit_x64_saturation.cpp
++++ b/src/dynarmic/backend/x64/emit_x64_saturation.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include <limits>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/integer_of_size.hpp"
+diff --git a/src/dynarmic/backend/x64/emit_x64_vector.cpp b/src/dynarmic/backend/x64/emit_x64_vector.cpp
+index 0ad86c19..e2e3eed5 100644
+--- a/src/dynarmic/backend/x64/emit_x64_vector.cpp
++++ b/src/dynarmic/backend/x64/emit_x64_vector.cpp
+@@ -12,7 +12,7 @@
+ #include <cstdlib>
+ #include <type_traits>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/mcl/function_info.hpp"
+diff --git a/src/dynarmic/backend/x64/emit_x64_vector_floating_point.cpp b/src/dynarmic/backend/x64/emit_x64_vector_floating_point.cpp
+index adbb9706..dbaf954b 100644
+--- a/src/dynarmic/backend/x64/emit_x64_vector_floating_point.cpp
++++ b/src/dynarmic/backend/x64/emit_x64_vector_floating_point.cpp
+@@ -12,7 +12,7 @@
+ #include <type_traits>
+ #include <utility>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/function_info.hpp"
+ #include "dynarmic/mcl/integer_of_size.hpp"
+ #include "dynarmic/backend/x64/xbyak.h"
+diff --git a/src/dynarmic/backend/x64/exception_handler_windows.cpp b/src/dynarmic/backend/x64/exception_handler_windows.cpp
+index bae397ff..70cfd432 100644
+--- a/src/dynarmic/backend/x64/exception_handler_windows.cpp
++++ b/src/dynarmic/backend/x64/exception_handler_windows.cpp
+@@ -12,7 +12,7 @@
+ #include <cstring>
+ #include <vector>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include <bit>
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/backend/x64/exclusive_monitor.cpp b/src/dynarmic/backend/x64/exclusive_monitor.cpp
+index fc0214ce..0ae3e2ef 100644
+--- a/src/dynarmic/backend/x64/exclusive_monitor.cpp
++++ b/src/dynarmic/backend/x64/exclusive_monitor.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <algorithm>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ namespace Dynarmic {
+ 
+diff --git a/src/dynarmic/backend/x64/hostloc.h b/src/dynarmic/backend/x64/hostloc.h
+index 8fd97a4e..864c5516 100644
+--- a/src/dynarmic/backend/x64/hostloc.h
++++ b/src/dynarmic/backend/x64/hostloc.h
+@@ -8,7 +8,7 @@
+ #pragma once
+ 
+ #include <bitset>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/backend/x64/xbyak.h"
+ 
+diff --git a/src/dynarmic/backend/x64/oparg.h b/src/dynarmic/backend/x64/oparg.h
+index d16728d1..71d5b437 100644
+--- a/src/dynarmic/backend/x64/oparg.h
++++ b/src/dynarmic/backend/x64/oparg.h
+@@ -8,7 +8,7 @@
+ 
+ #pragma once
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/backend/x64/xbyak.h"
+ 
+ namespace Dynarmic::Backend::X64 {
+diff --git a/src/dynarmic/backend/x64/reg_alloc.cpp b/src/dynarmic/backend/x64/reg_alloc.cpp
+index 2cfa14ae..383b8496 100644
+--- a/src/dynarmic/backend/x64/reg_alloc.cpp
++++ b/src/dynarmic/backend/x64/reg_alloc.cpp
+@@ -13,7 +13,7 @@
+ 
+ #include <fmt/ostream.h>
+ #include "dynarmic/backend/x64/hostloc.h"
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include <bit>
+ #include "dynarmic/backend/x64/xbyak.h"
+ 
+diff --git a/src/dynarmic/backend/x64/xbyak.h b/src/dynarmic/backend/x64/xbyak.h
+index 38401678..0dfb5daf 100644
+--- a/src/dynarmic/backend/x64/xbyak.h
++++ b/src/dynarmic/backend/x64/xbyak.h
+@@ -1,8 +1,27 @@
+ // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ 
++// SPDX-FileCopyrightText: 2016 Citra Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++
+ #pragma once
+ 
++#include <type_traits>
++#include <bitset>
++#include <initializer_list>
++#include "dynarmic/mcl/assert.hpp"
++#include "dynarmic/common/common_types.h"
++
++// xbyak hates human beings
++#ifdef __GNUC__
++#pragma GCC diagnostic ignored "-Wconversion"
++#pragma GCC diagnostic ignored "-Wshadow"
++#endif
++#ifdef __clang__
++#pragma clang diagnostic ignored "-Wconversion"
++#pragma clang diagnostic ignored "-Wshadow"
++#endif
++
+ // You must ensure this matches with src/common/x64/xbyak.h on root dir
+ #include <ankerl/unordered_dense.h>
+ #include <boost/unordered_map.hpp>
+@@ -11,3 +30,255 @@
+ #define XBYAK_STD_UNORDERED_MULTIMAP boost::unordered_multimap
+ #include <xbyak/xbyak.h>
+ #include <xbyak/xbyak_util.h>
++
++#include <xbyak/xbyak.h>
++
++namespace Common::X64 {
++
++constexpr size_t RegToIndex(const Xbyak::Reg& reg) {
++    using Kind = Xbyak::Reg::Kind;
++    ASSERT_MSG((reg.getKind() & (Kind::REG | Kind::XMM)) != 0,
++               "RegSet only support GPRs and XMM registers.");
++    ASSERT_MSG(reg.getIdx() < 16, "RegSet only supports XXM0-15.");
++    return static_cast<size_t>(reg.getIdx()) + (reg.getKind() == Kind::REG ? 0 : 16);
++}
++
++constexpr Xbyak::Reg64 IndexToReg64(size_t reg_index) {
++    ASSERT(reg_index < 16);
++    return Xbyak::Reg64(static_cast<int>(reg_index));
++}
++
++constexpr Xbyak::Xmm IndexToXmm(size_t reg_index) {
++    ASSERT(reg_index >= 16 && reg_index < 32);
++    return Xbyak::Xmm(static_cast<int>(reg_index - 16));
++}
++
++constexpr Xbyak::Reg IndexToReg(size_t reg_index) {
++    if (reg_index < 16) {
++        return IndexToReg64(reg_index);
++    } else {
++        return IndexToXmm(reg_index);
++    }
++}
++
++constexpr std::bitset<32> BuildRegSet(std::initializer_list<Xbyak::Reg> regs) {
++    size_t bits = 0;
++    for (const Xbyak::Reg& reg : regs) {
++        bits |= size_t{1} << RegToIndex(reg);
++    }
++    return {bits};
++}
++
++constexpr inline std::bitset<32> ABI_ALL_GPRS(0x0000FFFF);
++constexpr inline std::bitset<32> ABI_ALL_XMMS(0xFFFF0000);
++
++constexpr inline Xbyak::Reg ABI_JIT_REG = Xbyak::util::rbx;
++#ifdef _WIN32
++
++// Microsoft x64 ABI
++constexpr inline Xbyak::Reg ABI_RETURN = Xbyak::util::rax;
++constexpr inline Xbyak::Reg ABI_PARAM1 = Xbyak::util::rcx;
++constexpr inline Xbyak::Reg ABI_PARAM2 = Xbyak::util::rdx;
++constexpr inline Xbyak::Reg ABI_PARAM3 = Xbyak::util::r8;
++constexpr inline Xbyak::Reg ABI_PARAM4 = Xbyak::util::r9;
++
++constexpr inline std::bitset<32> ABI_ALL_CALLER_SAVED = BuildRegSet({
++    // GPRs
++    Xbyak::util::rcx,
++    Xbyak::util::rdx,
++    Xbyak::util::r8,
++    Xbyak::util::r9,
++    Xbyak::util::r10,
++    Xbyak::util::r11,
++    // XMMs
++    Xbyak::util::xmm0,
++    Xbyak::util::xmm1,
++    Xbyak::util::xmm2,
++    Xbyak::util::xmm3,
++    Xbyak::util::xmm4,
++    Xbyak::util::xmm5,
++});
++
++constexpr inline std::bitset<32> ABI_ALL_CALLEE_SAVED = BuildRegSet({
++    // GPRs
++    Xbyak::util::rbx,
++    Xbyak::util::rsi,
++    Xbyak::util::rdi,
++    Xbyak::util::rbp,
++    Xbyak::util::r12,
++    Xbyak::util::r13,
++    Xbyak::util::r14,
++    Xbyak::util::r15,
++    // XMMs
++    Xbyak::util::xmm6,
++    Xbyak::util::xmm7,
++    Xbyak::util::xmm8,
++    Xbyak::util::xmm9,
++    Xbyak::util::xmm10,
++    Xbyak::util::xmm11,
++    Xbyak::util::xmm12,
++    Xbyak::util::xmm13,
++    Xbyak::util::xmm14,
++    Xbyak::util::xmm15,
++});
++
++constexpr size_t ABI_SHADOW_SPACE = 0x20;
++
++#else
++
++// System V x86-64 ABI
++constexpr inline Xbyak::Reg ABI_RETURN = Xbyak::util::rax;
++constexpr inline Xbyak::Reg ABI_PARAM1 = Xbyak::util::rdi;
++constexpr inline Xbyak::Reg ABI_PARAM2 = Xbyak::util::rsi;
++constexpr inline Xbyak::Reg ABI_PARAM3 = Xbyak::util::rdx;
++constexpr inline Xbyak::Reg ABI_PARAM4 = Xbyak::util::rcx;
++
++constexpr inline std::bitset<32> ABI_ALL_CALLER_SAVED = BuildRegSet({
++    // GPRs
++    Xbyak::util::rcx,
++    Xbyak::util::rdx,
++    Xbyak::util::rdi,
++    Xbyak::util::rsi,
++    Xbyak::util::r8,
++    Xbyak::util::r9,
++    Xbyak::util::r10,
++    Xbyak::util::r11,
++    // XMMs
++    Xbyak::util::xmm0,
++    Xbyak::util::xmm1,
++    Xbyak::util::xmm2,
++    Xbyak::util::xmm3,
++    Xbyak::util::xmm4,
++    Xbyak::util::xmm5,
++    Xbyak::util::xmm6,
++    Xbyak::util::xmm7,
++    Xbyak::util::xmm8,
++    Xbyak::util::xmm9,
++    Xbyak::util::xmm10,
++    Xbyak::util::xmm11,
++    Xbyak::util::xmm12,
++    Xbyak::util::xmm13,
++    Xbyak::util::xmm14,
++    Xbyak::util::xmm15,
++});
++
++constexpr inline std::bitset<32> ABI_ALL_CALLEE_SAVED = BuildRegSet({
++    // GPRs
++    Xbyak::util::rbx,
++    Xbyak::util::rbp,
++    Xbyak::util::r12,
++    Xbyak::util::r13,
++    Xbyak::util::r14,
++    Xbyak::util::r15,
++});
++
++constexpr size_t ABI_SHADOW_SPACE = 0;
++
++#endif
++
++struct ABIFrameInfo {
++    s32 subtraction;
++    s32 xmm_offset;
++};
++
++inline ABIFrameInfo ABI_CalculateFrameSize(std::bitset<32> regs, size_t rsp_alignment,
++                                           size_t needed_frame_size) {
++    const auto count = (regs & ABI_ALL_GPRS).count();
++    rsp_alignment -= count * 8;
++    size_t subtraction = 0;
++    const auto xmm_count = (regs & ABI_ALL_XMMS).count();
++    if (xmm_count) {
++        // If we have any XMMs to save, we must align the stack here.
++        subtraction = rsp_alignment & 0xF;
++    }
++    subtraction += 0x10 * xmm_count;
++    size_t xmm_base_subtraction = subtraction;
++    subtraction += needed_frame_size;
++    subtraction += ABI_SHADOW_SPACE;
++    // Final alignment.
++    rsp_alignment -= subtraction;
++    subtraction += rsp_alignment & 0xF;
++
++    return ABIFrameInfo{
++        s32(subtraction),
++        s32(subtraction - xmm_base_subtraction)
++    };
++}
++
++inline size_t ABI_PushRegistersAndAdjustStack(Xbyak::CodeGenerator& code, std::bitset<32> regs, size_t rsp_alignment, size_t needed_frame_size = 0) {
++    auto frame_info = ABI_CalculateFrameSize(regs, rsp_alignment, needed_frame_size);
++
++    for (size_t i = 0; i < regs.size(); ++i) {
++        if (regs[i] && ABI_ALL_GPRS[i]) {
++            code.push(IndexToReg64(i));
++        }
++    }
++
++    if (frame_info.subtraction != 0) {
++        code.sub(code.rsp, frame_info.subtraction);
++    }
++
++    for (size_t i = 0; i < regs.size(); ++i) {
++        if (regs[i] && ABI_ALL_XMMS[i]) {
++            code.movaps(code.xword[code.rsp + frame_info.xmm_offset], IndexToXmm(i));
++            frame_info.xmm_offset += 0x10;
++        }
++    }
++
++    return ABI_SHADOW_SPACE;
++}
++
++inline void ABI_PopRegistersAndAdjustStack(Xbyak::CodeGenerator& code, std::bitset<32> regs, size_t rsp_alignment, size_t needed_frame_size = 0) {
++    auto frame_info = ABI_CalculateFrameSize(regs, rsp_alignment, needed_frame_size);
++
++    for (size_t i = 0; i < regs.size(); ++i) {
++        if (regs[i] && ABI_ALL_XMMS[i]) {
++            code.movaps(IndexToXmm(i), code.xword[code.rsp + frame_info.xmm_offset]);
++            frame_info.xmm_offset += 0x10;
++        }
++    }
++
++    if (frame_info.subtraction != 0) {
++        code.add(code.rsp, frame_info.subtraction);
++    }
++
++    // GPRs need to be popped in reverse order
++    for (size_t j = 0; j < regs.size(); ++j) {
++        const size_t i = regs.size() - j - 1;
++        if (regs[i] && ABI_ALL_GPRS[i]) {
++            code.pop(IndexToReg64(i));
++        }
++    }
++}
++
++// Constants for use with cmpps/cmpss
++enum {
++    CMP_EQ = 0,
++    CMP_LT = 1,
++    CMP_LE = 2,
++    CMP_UNORD = 3,
++    CMP_NEQ = 4,
++    CMP_NLT = 5,
++    CMP_NLE = 6,
++    CMP_ORD = 7,
++};
++
++constexpr bool IsWithin2G(uintptr_t ref, uintptr_t target) noexcept {
++    u64 const distance = target - (ref + 5);
++    return (distance & 0xffff'ffff) == distance;
++}
++
++template <typename T>
++inline void CallFarFunction(Xbyak::CodeGenerator& code, const T f) {
++    static_assert(std::is_pointer_v<T>, "Argument must be a (function) pointer.");
++    uintptr_t addr = uintptr_t(f);
++    if (IsWithin2G(uintptr_t(code.getCurr()), addr)) {
++        code.call(f);
++    } else {
++        // ABI_RETURN is a safe temp register to use before a call
++        code.mov(ABI_RETURN, addr);
++        code.call(ABI_RETURN);
++    }
++}
++
++} // namespace Common::X64
+\ No newline at end of file
+diff --git a/src/dynarmic/common/common_types.h b/src/dynarmic/common/common_types.h
+new file mode 100644
+index 00000000..ae04c4d6
+--- /dev/null
++++ b/src/dynarmic/common/common_types.h
+@@ -0,0 +1,53 @@
++// SPDX-FileCopyrightText: 2012 Gekko Emulator
++// SPDX-FileContributor: ShizZy <shizzy247@gmail.com>
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++/**
++ * Copyright (C) 2005-2012 Gekko Emulator
++ *
++ * @file    common_types.h
++ * @author  ShizZy <shizzy247@gmail.com>
++ * @date    2012-02-11
++ * @brief   Common types used throughout the project
++ *
++ * @section LICENSE
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details at
++ * http://www.gnu.org/copyleft/gpl.html
++ *
++ * Official project repository can be found at:
++ * http://code.google.com/p/gekko-gc-emu/
++ */
++
++#pragma once
++
++#include <array>
++#include <cstdint>
++
++using u8 = std::uint8_t;   ///< 8-bit unsigned byte
++using u16 = std::uint16_t; ///< 16-bit unsigned short
++using u32 = std::uint32_t; ///< 32-bit unsigned word
++using u64 = std::uint64_t; ///< 64-bit unsigned int
++
++using s8 = std::int8_t;   ///< 8-bit signed byte
++using s16 = std::int16_t; ///< 16-bit signed short
++using s32 = std::int32_t; ///< 32-bit signed word
++using s64 = std::int64_t; ///< 64-bit signed int
++
++using f32 = float;  ///< 32-bit floating point
++using f64 = double; ///< 64-bit floating point
++
++using VAddr = u64;    ///< Represents a pointer in the userspace virtual address space.
++using DAddr = u64;    ///< Represents a pointer in the device specific virtual address space.
++using PAddr = u64;    ///< Represents a pointer in the ARM11 physical address space.
++using GPUVAddr = u64; ///< Represents a pointer in the GPU virtual address space.
++
++using u128 = std::array<std::uint64_t, 2>;
++static_assert(sizeof(u128) == 16, "u128 must be 128 bits wide");
+diff --git a/src/dynarmic/common/context.h b/src/dynarmic/common/context.h
+index db7af8e0..7126c35a 100644
+--- a/src/dynarmic/common/context.h
++++ b/src/dynarmic/common/context.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include "dynarmic/mcl/architecture.hpp"
++
+ #ifdef __APPLE__
+ #    include <signal.h>
+ #    include <sys/ucontext.h>
+@@ -34,7 +36,7 @@
+ #    endif
+ #endif
+ 
+-#ifdef ARCHITECTURE_arm64
++#ifdef MCL_ARCHITECTURE_ARM64
+ #   ifdef __OpenBSD__
+ #       define CTX_DECLARE(raw_context) ucontext_t* ucontext = reinterpret_cast<ucontext_t*>(raw_context);
+ #   else
+@@ -62,14 +64,14 @@
+ #   define CTX_PC (_UC_MACHINE_PC(ucontext))
+ // NetBSD defines a redzone for SP but we don't require nor want that
+ // ((uc)->uc_mcontext.__gregs[_REG_RSP] - 128) -> this is not desirable due to calcs
+-#if defined(ARCHITECTURE_x86_64)
++#if defined(MCL_ARCHITECTURE_X86_64)
+ #   define CTX_SP (mctx.__gregs[_REG_RSP])
+ #else
+ #   define CTX_SP (_UC_MACHINE_SP(ucontext))
+ #endif
+ #endif
+ 
+-#if defined(ARCHITECTURE_arm64)
++#if defined(MCL_ARCHITECTURE_ARM64)
+ #    if defined(__APPLE__)
+ #        define CTX_PC (mctx->__ss.__pc)
+ #        define CTX_SP (mctx->__ss.__sp)
+@@ -108,7 +110,7 @@
+ #    else
+ #        error "unknown platform"
+ #    endif
+-#elif defined(ARCHITECTURE_x86_64)
++#elif defined(MCL_ARCHITECTURE_X86_64)
+ #    if defined(__APPLE__)
+ #        define CTX_PC (mctx->__ss.__rip)
+ #        define CTX_SP (mctx->__ss.__rsp)
+@@ -204,7 +206,7 @@
+ #    error "unimplemented"
+ #endif
+ 
+-#ifdef ARCHITECTURE_arm64
++#ifdef MCL_ARCHITECTURE_ARM64
+ #ifdef __APPLE__
+ inline _STRUCT_ARM_NEON_STATE64* GetFloatingPointState(mcontext_t& host_ctx) {
+     return &(host_ctx->__ns);
+diff --git a/src/dynarmic/common/fp/fpcr.h b/src/dynarmic/common/fp/fpcr.h
+index 948917bc..fce73dcd 100644
+--- a/src/dynarmic/common/fp/fpcr.h
++++ b/src/dynarmic/common/fp/fpcr.h
+@@ -10,7 +10,7 @@
+ 
+ #include <optional>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/common/fp/op/FPRecipEstimate.cpp b/src/dynarmic/common/fp/op/FPRecipEstimate.cpp
+index bc43088c..5835af65 100644
+--- a/src/dynarmic/common/fp/op/FPRecipEstimate.cpp
++++ b/src/dynarmic/common/fp/op/FPRecipEstimate.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <tuple>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/common/fp/fpcr.h"
+diff --git a/src/dynarmic/common/fp/op/FPRoundInt.cpp b/src/dynarmic/common/fp/op/FPRoundInt.cpp
+index 4bcfcd7c..5cd3a96f 100644
+--- a/src/dynarmic/common/fp/op/FPRoundInt.cpp
++++ b/src/dynarmic/common/fp/op/FPRoundInt.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/common/fp/op/FPRoundInt.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/common/fp/op/FPToFixed.cpp b/src/dynarmic/common/fp/op/FPToFixed.cpp
+index 758ee856..d5ebfbfc 100644
+--- a/src/dynarmic/common/fp/op/FPToFixed.cpp
++++ b/src/dynarmic/common/fp/op/FPToFixed.cpp
+@@ -9,7 +9,7 @@
+ #include "dynarmic/common/fp/op/FPToFixed.h"
+ 
+ #include <fmt/format.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/common/fp/process_exception.cpp b/src/dynarmic/common/fp/process_exception.cpp
+index e9b7c121..bd0c862e 100644
+--- a/src/dynarmic/common/fp/process_exception.cpp
++++ b/src/dynarmic/common/fp/process_exception.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/common/fp/process_exception.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/common/fp/fpcr.h"
+ #include "dynarmic/common/fp/fpsr.h"
+diff --git a/src/dynarmic/common/fp/process_nan.cpp b/src/dynarmic/common/fp/process_nan.cpp
+index 7f47852d..d34a4970 100644
+--- a/src/dynarmic/common/fp/process_nan.cpp
++++ b/src/dynarmic/common/fp/process_nan.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <optional>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/common/fp/fpcr.h"
+diff --git a/src/dynarmic/common/llvm_disassemble.cpp b/src/dynarmic/common/llvm_disassemble.cpp
+index 06083680..a5e9b0f6 100644
+--- a/src/dynarmic/common/llvm_disassemble.cpp
++++ b/src/dynarmic/common/llvm_disassemble.cpp
+@@ -14,7 +14,7 @@
+ #    include <llvm-c/Target.h>
+ #endif
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/common/llvm_disassemble.h"
+diff --git a/src/dynarmic/frontend/A32/a32_ir_emitter.cpp b/src/dynarmic/frontend/A32/a32_ir_emitter.cpp
+index 5a5ad37e..33ded426 100644
+--- a/src/dynarmic/frontend/A32/a32_ir_emitter.cpp
++++ b/src/dynarmic/frontend/A32/a32_ir_emitter.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/frontend/A32/a32_ir_emitter.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/frontend/A32/a32_types.h"
+ #include "dynarmic/interface/A32/arch_version.h"
+diff --git a/src/dynarmic/frontend/A32/a32_types.h b/src/dynarmic/frontend/A32/a32_types.h
+index 9e9ffd33..a79043fe 100644
+--- a/src/dynarmic/frontend/A32/a32_types.h
++++ b/src/dynarmic/frontend/A32/a32_types.h
+@@ -10,7 +10,7 @@
+ 
+ #include <string>
+ #include <fmt/format.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ #include "dynarmic/interface/A32/coprocessor_util.h"
+ #include "dynarmic/ir/cond.h"
+diff --git a/src/dynarmic/frontend/A32/translate/conditional_state.cpp b/src/dynarmic/frontend/A32/translate/conditional_state.cpp
+index 82d25f13..2959999b 100644
+--- a/src/dynarmic/frontend/A32/translate/conditional_state.cpp
++++ b/src/dynarmic/frontend/A32/translate/conditional_state.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <algorithm>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/frontend/A32/a32_ir_emitter.h"
+diff --git a/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.cpp b/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.cpp
+index 7b21e7cc..f4c8ecc4 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.cpp
++++ b/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/frontend/A32/translate/impl/a32_translate_impl.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/interface/A32/config.h"
+ 
+diff --git a/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.h b/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.h
+index c0fc668a..8861e4ce 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.h
++++ b/src/dynarmic/frontend/A32/translate/impl/a32_translate_impl.h
+@@ -8,7 +8,7 @@
+ 
+ #pragma once
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/a32_ir_emitter.h"
+diff --git a/src/dynarmic/frontend/A32/translate/impl/asimd_misc.cpp b/src/dynarmic/frontend/A32/translate/impl/asimd_misc.cpp
+index 26c49cc3..b1998d07 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/asimd_misc.cpp
++++ b/src/dynarmic/frontend/A32/translate/impl/asimd_misc.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include <vector>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/translate/impl/a32_translate_impl.h"
+diff --git a/src/dynarmic/frontend/A32/translate/impl/asimd_one_reg_modified_immediate.cpp b/src/dynarmic/frontend/A32/translate/impl/asimd_one_reg_modified_immediate.cpp
+index c5bdb1b5..5444ccea 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/asimd_one_reg_modified_immediate.cpp
++++ b/src/dynarmic/frontend/A32/translate/impl/asimd_one_reg_modified_immediate.cpp
+@@ -6,7 +6,7 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/translate/impl/a32_translate_impl.h"
+diff --git a/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_scalar.cpp b/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_scalar.cpp
+index d9cc3b1e..d8a34eee 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_scalar.cpp
++++ b/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_scalar.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include <utility>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/translate/impl/a32_translate_impl.h"
+diff --git a/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_shift.cpp b/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_shift.cpp
+index e5a4eb53..8ed1b2b3 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_shift.cpp
++++ b/src/dynarmic/frontend/A32/translate/impl/asimd_two_regs_shift.cpp
+@@ -6,7 +6,7 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/translate/impl/a32_translate_impl.h"
+diff --git a/src/dynarmic/frontend/A32/translate/impl/thumb32_data_processing_plain_binary_immediate.cpp b/src/dynarmic/frontend/A32/translate/impl/thumb32_data_processing_plain_binary_immediate.cpp
+index 7ea31d40..8758faec 100644
+--- a/src/dynarmic/frontend/A32/translate/impl/thumb32_data_processing_plain_binary_immediate.cpp
++++ b/src/dynarmic/frontend/A32/translate/impl/thumb32_data_processing_plain_binary_immediate.cpp
+@@ -6,7 +6,7 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/translate/impl/a32_translate_impl.h"
+diff --git a/src/dynarmic/frontend/A32/translate/translate_arm.cpp b/src/dynarmic/frontend/A32/translate/translate_arm.cpp
+index 0783febb..212cae44 100644
+--- a/src/dynarmic/frontend/A32/translate/translate_arm.cpp
++++ b/src/dynarmic/frontend/A32/translate/translate_arm.cpp
+@@ -6,7 +6,7 @@
+  * SPDX-License-Identifier: 0BSD
+  */
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/frontend/A32/a32_location_descriptor.h"
+ #include "dynarmic/frontend/A32/a32_types.h"
+diff --git a/src/dynarmic/frontend/A32/translate/translate_thumb.cpp b/src/dynarmic/frontend/A32/translate/translate_thumb.cpp
+index d401cc14..99e84940 100644
+--- a/src/dynarmic/frontend/A32/translate/translate_thumb.cpp
++++ b/src/dynarmic/frontend/A32/translate/translate_thumb.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include <tuple>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/frontend/A32/a32_ir_emitter.h"
+diff --git a/src/dynarmic/frontend/A64/a64_ir_emitter.h b/src/dynarmic/frontend/A64/a64_ir_emitter.h
+index b80e4292..50c6f0a5 100644
+--- a/src/dynarmic/frontend/A64/a64_ir_emitter.h
++++ b/src/dynarmic/frontend/A64/a64_ir_emitter.h
+@@ -11,7 +11,7 @@
+ #include <optional>
+ 
+ #include "dynarmic/common/common_types.h"
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/frontend/A64/a64_location_descriptor.h"
+ #include "dynarmic/frontend/A64/a64_types.h"
+diff --git a/src/dynarmic/frontend/A64/a64_types.h b/src/dynarmic/frontend/A64/a64_types.h
+index 2a8b1a77..48def5f3 100644
+--- a/src/dynarmic/frontend/A64/a64_types.h
++++ b/src/dynarmic/frontend/A64/a64_types.h
+@@ -11,7 +11,7 @@
+ #include <string>
+ 
+ #include <fmt/format.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/ir/cond.h"
+diff --git a/src/dynarmic/frontend/A64/translate/impl/simd_vector_x_indexed_element.cpp b/src/dynarmic/frontend/A64/translate/impl/simd_vector_x_indexed_element.cpp
+index 12ff153d..67376b0e 100644
+--- a/src/dynarmic/frontend/A64/translate/impl/simd_vector_x_indexed_element.cpp
++++ b/src/dynarmic/frontend/A64/translate/impl/simd_vector_x_indexed_element.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include <utility>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/frontend/A64/translate/impl/impl.h"
+ 
+diff --git a/src/dynarmic/frontend/decoder/decoder_detail.h b/src/dynarmic/frontend/decoder/decoder_detail.h
+index 3fc37c61..42e27b47 100644
+--- a/src/dynarmic/frontend/decoder/decoder_detail.h
++++ b/src/dynarmic/frontend/decoder/decoder_detail.h
+@@ -11,7 +11,7 @@
+ #include <array>
+ #include <tuple>
+ #include <utility>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ namespace Dynarmic::Decoder {
+diff --git a/src/dynarmic/frontend/decoder/matcher.h b/src/dynarmic/frontend/decoder/matcher.h
+index a30284fe..49f849ce 100644
+--- a/src/dynarmic/frontend/decoder/matcher.h
++++ b/src/dynarmic/frontend/decoder/matcher.h
+@@ -11,7 +11,7 @@
+ #include <functional>
+ #include <tuple>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ namespace Dynarmic::Decoder {
+ 
+diff --git a/src/dynarmic/frontend/imm.cpp b/src/dynarmic/frontend/imm.cpp
+index aeb7b5d3..3006ef0d 100644
+--- a/src/dynarmic/frontend/imm.cpp
++++ b/src/dynarmic/frontend/imm.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/frontend/imm.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/frontend/imm.h b/src/dynarmic/frontend/imm.h
+index 3aefcb09..b7892be7 100644
+--- a/src/dynarmic/frontend/imm.h
++++ b/src/dynarmic/frontend/imm.h
+@@ -10,7 +10,7 @@
+ 
+ #include <type_traits>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+diff --git a/src/dynarmic/ir/basic_block.cpp b/src/dynarmic/ir/basic_block.cpp
+index ac0f03d7..709af6fa 100644
+--- a/src/dynarmic/ir/basic_block.cpp
++++ b/src/dynarmic/ir/basic_block.cpp
+@@ -14,7 +14,7 @@
+ #include <string>
+ 
+ #include <fmt/format.h>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/frontend/A32/a32_types.h"
+ #include "dynarmic/frontend/A64/a64_types.h"
+ #include "dynarmic/ir/cond.h"
+diff --git a/src/dynarmic/ir/ir_emitter.h b/src/dynarmic/ir/ir_emitter.h
+index ed95c8b5..197d4d23 100644
+--- a/src/dynarmic/ir/ir_emitter.h
++++ b/src/dynarmic/ir/ir_emitter.h
+@@ -11,7 +11,7 @@
+ #include <vector>
+ 
+ #include "dynarmic/common/common_types.h"
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/ir/opcodes.h"
+diff --git a/src/dynarmic/ir/microinstruction.cpp b/src/dynarmic/ir/microinstruction.cpp
+index e162388c..59512259 100644
+--- a/src/dynarmic/ir/microinstruction.cpp
++++ b/src/dynarmic/ir/microinstruction.cpp
+@@ -10,7 +10,7 @@
+ 
+ #include <algorithm>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ #include "dynarmic/ir/opcodes.h"
+ #include "dynarmic/ir/type.h"
+diff --git a/src/dynarmic/ir/value.cpp b/src/dynarmic/ir/value.cpp
+index 451036b1..d15b2a18 100644
+--- a/src/dynarmic/ir/value.cpp
++++ b/src/dynarmic/ir/value.cpp
+@@ -8,7 +8,7 @@
+ 
+ #include "dynarmic/ir/value.h"
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/mcl/bit.hpp"
+ 
+ #include "dynarmic/ir/microinstruction.h"
+diff --git a/src/dynarmic/ir/value.h b/src/dynarmic/ir/value.h
+index 20f266aa..c93eb5b2 100644
+--- a/src/dynarmic/ir/value.h
++++ b/src/dynarmic/ir/value.h
+@@ -11,7 +11,7 @@
+ #include <array>
+ #include <type_traits>
+ 
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ #include "dynarmic/common/common_types.h"
+ 
+ #include "dynarmic/ir/type.h"
+diff --git a/src/dynarmic/mcl/architecture.hpp b/src/dynarmic/mcl/architecture.hpp
+new file mode 100644
+index 00000000..3f0b2f10
+--- /dev/null
++++ b/src/dynarmic/mcl/architecture.hpp
+@@ -0,0 +1,40 @@
++// This file is part of the mcl project.
++// Copyright (c) 2022 merryhime
++// SPDX-License-Identifier: MIT
++
++#pragma once
++
++#if defined(__ARM64__) || defined(__aarch64__) || defined(_M_ARM64)
++#    define MCL_ARCHITECTURE arm64
++#    define MCL_ARCHITECTURE_ARM64 1
++#elif defined(__arm__) || defined(__TARGET_ARCH_ARM) || defined(_M_ARM)
++#    define MCL_ARCHITECTURE arm32
++#    define MCL_ARCHITECTURE_ARM32 1
++#elif defined(__x86_64) || defined(__x86_64__) || defined(__amd64) || defined(_M_X64)
++#    define MCL_ARCHITECTURE x86_64
++#    define MCL_ARCHITECTURE_X86_64 1
++#elif defined(__i386) || defined(__i386__) || defined(_M_IX86)
++#    define MCL_ARCHITECTURE x86_32
++#    define MCL_ARCHITECTURE_X86_32 1
++#elif defined(__ia64) || defined(__ia64__) || defined(_M_IA64)
++#    define MCL_ARCHITECTURE ia64
++#    define MCL_ARCHITECTURE_IA64 1
++#elif defined(__mips) || defined(__mips__) || defined(_M_MRX000)
++#    define MCL_ARCHITECTURE mips
++#    define MCL_ARCHITECTURE_MIPS 1
++#elif defined(__ppc64__) || defined(__powerpc64__)
++#    define MCL_ARCHITECTURE ppc64
++#    define MCL_ARCHITECTURE_PPC64 1
++#elif defined(__ppc__) || defined(__ppc) || defined(__powerpc__) || defined(_ARCH_COM) || defined(_ARCH_PWR) || defined(_ARCH_PPC) || defined(_M_MPPC) || defined(_M_PPC)
++#    define MCL_ARCHITECTURE ppc32
++#    define MCL_ARCHITECTURE_PPC32 1
++#elif defined(__riscv)
++#    define MCL_ARCHITECTURE riscv
++#    define MCL_ARCHITECTURE_RISCV 1
++#elif defined(__EMSCRIPTEN__)
++#    define MCL_ARCHITECTURE wasm
++#    define MCL_ARCHITECTURE_WASM 1
++#else
++#    define MCL_ARCHITECTURE generic
++#    define MCL_ARCHITECTURE_GENERIC 1
++#endif
+\ No newline at end of file
+diff --git a/src/dynarmic/mcl/assert.cpp b/src/dynarmic/mcl/assert.cpp
+new file mode 100644
+index 00000000..ee849ef5
+--- /dev/null
++++ b/src/dynarmic/mcl/assert.cpp
+@@ -0,0 +1,22 @@
++// This file is part of the mcl project.
++// Copyright (c) 2022 merryhime
++// SPDX-License-Identifier: MIT
++
++#include <dynarmic/mcl/assert.hpp>
++
++#include <cstdio>
++#include <exception>
++
++#include <fmt/format.h>
++
++namespace mcl::detail {
++
++    [[noreturn]] void assert_terminate_impl(const char* expr_str, fmt::string_view msg, fmt::format_args args)
++    {
++        fmt::print(stderr, "assertion failed: {}\nMessage:", expr_str);
++        fmt::vprint(stderr, msg, args);
++        std::fflush(stderr);
++        std::terminate();
++    }
++
++}  // namespace mcl::detail
+\ No newline at end of file
+diff --git a/src/dynarmic/mcl/assert.hpp b/src/dynarmic/mcl/assert.hpp
+new file mode 100644
+index 00000000..81020082
+--- /dev/null
++++ b/src/dynarmic/mcl/assert.hpp
+@@ -0,0 +1,69 @@
++// This file is part of the mcl project.
++// Copyright (c) 2022 merryhime
++// SPDX-License-Identifier: MIT
++
++#pragma once
++
++#include <stdexcept>
++#include <type_traits>
++
++#include <fmt/format.h>
++
++namespace mcl::detail {
++
++[[noreturn]] void assert_terminate_impl(const char* expr_str, fmt::string_view msg, fmt::format_args args);
++
++template<typename... Ts>
++[[noreturn]] void assert_terminate(const char* expr_str, fmt::string_view msg, Ts... args)
++{
++    assert_terminate_impl(expr_str, msg, fmt::make_format_args(args...));
++}
++
++}  // namespace mcl::detail
++
++#if defined(__clang) || defined(__GNUC__)
++#    define ASSUME(expr) [&] { if (!(expr)) __builtin_unreachable(); }()
++#elif defined(_MSC_VER)
++#    define ASSUME(expr) __assume(expr)
++#else
++#    define ASSUME(expr)
++#endif
++
++#define UNREACHABLE() ASSERT_FALSE("Unreachable code!")
++#define UNIMPLEMENTED() ASSERT_FALSE("Unimplemented at {}:{} ", __FILE__, __LINE__);
++
++#define ASSERT(expr)                                                     \
++    [&] {                                                                \
++        if (std::is_constant_evaluated()) {                              \
++            if (!(expr)) {                                               \
++                throw std::logic_error{"ASSERT failed at compile time"}; \
++            }                                                            \
++        } else {                                                         \
++            if (!(expr)) [[unlikely]] {                                  \
++                ::mcl::detail::assert_terminate(#expr, "(none)");        \
++            }                                                            \
++        }                                                                \
++    }()
++
++#define ASSERT_MSG(expr, ...)                                                \
++    [&] {                                                                    \
++        if (std::is_constant_evaluated()) {                                  \
++            if (!(expr)) {                                                   \
++                throw std::logic_error{"ASSERT_MSG failed at compile time"}; \
++            }                                                                \
++        } else {                                                             \
++            if (!(expr)) [[unlikely]] {                                      \
++                ::mcl::detail::assert_terminate(#expr, __VA_ARGS__);         \
++            }                                                                \
++        }                                                                    \
++    }()
++
++#define ASSERT_FALSE(...) ::mcl::detail::assert_terminate("false", __VA_ARGS__)
++
++#if defined(NDEBUG) || defined(MCL_IGNORE_ASSERTS)
++#    define DEBUG_ASSERT(expr) ASSUME(expr)
++#    define DEBUG_ASSERT_MSG(expr, ...) ASSUME(expr)
++#else
++#    define DEBUG_ASSERT(expr) ASSERT(expr)
++#    define DEBUG_ASSERT_MSG(expr, ...) ASSERT_MSG(expr, __VA_ARGS__)
++#endif
+\ No newline at end of file
+diff --git a/src/dynarmic/mcl/bit.hpp b/src/dynarmic/mcl/bit.hpp
+index 959d0312..8a4f59f2 100644
+--- a/src/dynarmic/mcl/bit.hpp
++++ b/src/dynarmic/mcl/bit.hpp
+@@ -12,7 +12,7 @@
+ #include <bit>
+ 
+ #include "dynarmic/common/common_types.h"
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ namespace mcl {
+ template<typename T>
+diff --git a/src/dynarmic/mcl/intrusive_list.hpp b/src/dynarmic/mcl/intrusive_list.hpp
+index 3b1c1d66..5d1a825e 100644
+--- a/src/dynarmic/mcl/intrusive_list.hpp
++++ b/src/dynarmic/mcl/intrusive_list.hpp
+@@ -9,7 +9,7 @@
+ #include <iterator>
+ #include <memory>
+ #include <type_traits>
+-#include "dynarmic/common/assert.h"
++#include "dynarmic/mcl/assert.hpp"
+ 
+ namespace mcl {
+ 
+-- 
+2.54.0
+
