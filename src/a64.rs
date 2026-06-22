@@ -5,7 +5,7 @@ pub type VAddr = u64;
 
 // Internal VTable for Callbacks
 #[repr(C)]
-struct DynarmicCallbacks<T> {
+struct DynarmicCallbacks<T: Callbacks> {
     #[cfg(not(target_env = "msvc"))]
     offset_to_top: isize, // our inheritence is fake, we're essentially making UserCallbacks a final class, so this should always be 0 as UserCallbacks has no fields
     #[cfg(not(target_env = "msvc"))]
@@ -53,7 +53,7 @@ struct DynarmicCallbacks<T> {
 }
 
 #[repr(C)]
-pub(crate) struct DynarmicConfig<T> {
+pub(crate) struct DynarmicConfig<T: Callbacks> {
     fastmem_pointer: crate::cxx::CxxOptional<usize>,
     callbacks: *mut CallbackImpl<T>,
     global_monitor: *mut crate::ExclusiveMonitor,
@@ -615,6 +615,35 @@ impl<'a, T: Callbacks> Default for Config<'a, T> {
     }
 }
 
+#[repr(transparent)]
+pub(crate) struct EmptyCallbacks(u8);
+
+impl Callbacks for EmptyCallbacks {
+    extern "C" fn memory_read<T: GuestInt>(_: &CallbackImpl<Self>, _: VAddr) -> T {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
+    extern "C" fn memory_write<T: GuestInt>(_: &mut CallbackImpl<Self>, _: VAddr, _: T) {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
+    extern "C" fn call_svc(_: &mut CallbackImpl<Self>, _: u32) {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
+    extern "C" fn add_ticks(_: &mut CallbackImpl<Self>, _: u64) {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
+    extern "C" fn get_ticks_remaining(_: &CallbackImpl<Self>) -> u64 {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+
+    extern "C" fn get_cntpct(_: &CallbackImpl<Self>) -> u64 {
+        unsafe { std::hint::unreachable_unchecked() }
+    }
+}
+
 impl<'a, T: Callbacks> Config<'a, T> {
     pub fn new() -> Self {
         Self {
@@ -659,7 +688,7 @@ impl<'a, T: Callbacks> Config<'a, T> {
     }
     pub fn init(&mut self, cb: T) -> Dynarmic<'a, T> {
         unsafe extern "C-unwind" {
-            pub fn new_a64_jit(conf: *mut DynarmicConfig<u8>) -> *mut Jit;
+            pub fn new_a64_jit(conf: *mut DynarmicConfig<EmptyCallbacks>) -> *mut Jit;
         }
         let mut cb = Box::new(cb);
         let mut cpp_cb: Box<CallbackImpl<T>> = Box::new(CallbackImpl {

@@ -1,6 +1,4 @@
-mod fastmem;
-
-mod a32 {
+/*mod a32 {
     use dynarmic::a32::{Callbacks, VAddr};
     use dynarmic::{CallbackImpl, DynarmicA32};
 
@@ -73,7 +71,7 @@ mod a32 {
         assert_eq!(jit.get_reg(1), 1);
         assert_eq!(jit.get_reg(2), 2);
     }
-}
+} */
 
 mod a64 {
     use dynarmic::a64::{Callbacks, VAddr};

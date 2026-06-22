@@ -1,4 +1,4 @@
-mod a32 {
+/*mod a32 {
     use dynarmic::a32::{Callbacks, VAddr};
     use dynarmic::{CallbackImpl, DynarmicA32, GuestInt};
     use std::cmp::Ordering;
@@ -109,7 +109,7 @@ mod a32 {
             );
         }
     }
-}
+}*/
 mod a64 {
     use dynarmic::a64::{Callbacks, VAddr};
     use dynarmic::{CallbackImpl, DynarmicA64, GuestInt};

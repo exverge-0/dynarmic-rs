@@ -1,9 +1,10 @@
-pub mod a32;
+//pub mod a32;
 pub mod a64;
 pub(crate) mod cxx;
 
-pub type DynarmicA32<T> = a32::Dynarmic<T>;
+//pub type DynarmicA32<T> = a32::Dynarmic<T>;
 pub type DynarmicA64<'a, T> = a64::Dynarmic<'a, T>;
+pub use a64::*;
 
 use std::ops::{Deref, DerefMut};
 
@@ -11,22 +12,22 @@ use std::ops::{Deref, DerefMut};
 pub trait GuestInt: num_traits::PrimInt + num_traits::Unsigned {}
 impl<T> GuestInt for T where T: num_traits::PrimInt + num_traits::Unsigned {}
 
-/// Wrapper struct for an empty type implementing dynarmic's `Callbacks`.
+/// Wrapper struct for an empty type implementing dynarmic's [UserCallbacks](Callbacks).
 ///
 /// Dereferences to `T`.
 #[repr(C)]
-pub struct CallbackImpl<T> {
+pub struct CallbackImpl<T: Callbacks> {
     pub(crate) vtable: *const (),
     pub(crate) ptr: *mut T,
 }
 
-impl<T> CallbackImpl<T> {
+impl<T: Callbacks> CallbackImpl<T> {
     const _PTR_ASSERT: () = {
         assert!(std::mem::offset_of!(CallbackImpl<T>, vtable) == 0);
     };
 }
 
-impl<T> Deref for CallbackImpl<T> {
+impl<T: Callbacks> Deref for CallbackImpl<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -34,7 +35,7 @@ impl<T> Deref for CallbackImpl<T> {
     }
 }
 
-impl<T> DerefMut for CallbackImpl<T> {
+impl<T: Callbacks> DerefMut for CallbackImpl<T> {
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.ptr }
     }
@@ -133,11 +134,7 @@ impl ExclusiveMonitor {
     #[inline(always)]
     pub fn new(processor_count: usize) -> Self {
         debug_assert!(processor_count < 4, "dynarmic does not support greater than 4 cores");
-        let mut exclusive_addr: [u64; 4] = [0; 4];
-        
-        for i in 0..processor_count {
-            exclusive_addr[i] = 0xDEADDEADDEADDEAD; // INVALID_EXCLUSIVE_ADDRESS
-        }
+        let exclusive_addr: [u64; 4] = [0xDEADDEADDEADDEAD; 4];
         
         Self {
             exclusive_addr,

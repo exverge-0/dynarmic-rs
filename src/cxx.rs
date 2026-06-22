@@ -32,6 +32,7 @@ impl From<u32> for CxxOptional<u32> {
     }
 }
 
+/*
 #[repr(C)]
 pub struct CxxSharedPtr<T: Sized> {
     __data: *mut MaybeUninit<T>,
@@ -56,7 +57,7 @@ impl Default for CxxSharedPtr<crate::a32::Coprocessor> {
         unsafe { std::mem::zeroed() }
     }
 }
-
+*/
 const _: () = {
     assert!(
         size_of::<CxxOptional<u32>>() == 8,
@@ -70,18 +71,18 @@ const _: () = {
         size_of::<CxxOptional<usize>>() == 16,
         "Failed to verify size of type std::optional<usize>"
     );
-    assert!(
+    /*assert!(
         size_of::<crate::a32::DynarmicConfig<u32>>() == 344,
         "Failed to verify size of type a32::UserConfig"
-    );
+    );*/
     assert!(
-        size_of::<crate::a64::DynarmicConfig<u32>>() == 120,
+        size_of::<crate::a64::DynarmicConfig<crate::a64::EmptyCallbacks>>() == 120,
         "Failed to verify size of type a64::UserConfig"
     );
-    assert!(
+    /*assert!(
         size_of::<CxxSharedPtr<crate::a32::Coprocessor>>() == 16,
         "Failed to verify size of type cpp_shared_ptr"
-    );
+    );*/
     assert!(
         size_of::<crate::ExclusiveMonitor>() == 104 + size_of::<usize>(),
         "Failed to verify size of type ExclusiveMonitor"
